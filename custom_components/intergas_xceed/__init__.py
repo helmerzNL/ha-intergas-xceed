@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from importlib import import_module
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -35,6 +37,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: IntergasXceedConfigEntry
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
+    await _async_preload_platforms(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -52,3 +55,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: IntergasXceedConfigEntr
 async def _async_update_listener(hass: HomeAssistant, entry: IntergasXceedConfigEntry) -> None:
     """Reload the integration when options change."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def _async_preload_platforms(hass: HomeAssistant) -> None:
+    """Import platforms in the executor before forwarding them to Home Assistant."""
+    await asyncio.gather(
+        *(
+            hass.async_add_executor_job(import_module, f"{__package__}.{platform.value}")
+            for platform in PLATFORMS
+        )
+    )
