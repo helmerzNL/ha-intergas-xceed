@@ -20,6 +20,28 @@ from .entity import IntergasXceedEntity
 DEFAULT_MIN_TEMP = 5.0
 DEFAULT_MAX_TEMP = 65.0
 
+_WEEKDAY_NAMES = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
+
+
+def _format_hour(value: float | None) -> str | None:
+    """Format a decimal hour (``13.5``) as ``"HH:MM"`` (``"13:30"``)."""
+    if value is None:
+        return None
+    hours = int(value)
+    minutes = int(round((value - hours) * 60))
+    if minutes == 60:
+        hours += 1
+        minutes = 0
+    return f"{hours:02d}:{minutes:02d}"
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -94,16 +116,35 @@ class IntergasXceedWaterHeater(IntergasXceedEntity, WaterHeaterEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional circuit information."""
+        """Return additional circuit information.
+
+        Day/night setpoints and the schedule are sourced from the XpertOnly
+        wizard model when available (it matches the boiler menu exactly); the
+        room-list values are only a fallback until the first wizard read.
+        """
         room = self._room
-        if room is None:
-            return {}
-        return {
-            "day_temperature": room.day_temperature,
-            "night_temperature": room.night_temperature,
-            "status": room.status,
-            "schedule": room.schedule,
-        }
+        dhw = self.coordinator.data.dhw
+        attrs: dict[str, Any] = {}
+        if room is not None:
+            attrs["status"] = room.status
+        if dhw is not None and dhw.available:
+            attrs["day_temperature"] = dhw.day_setpoint
+            attrs["night_temperature"] = dhw.night_setpoint
+            attrs["schedule"] = [
+                {
+                    "weekday": _WEEKDAY_NAMES[slot.weekday]
+                    if 0 <= slot.weekday < len(_WEEKDAY_NAMES)
+                    else slot.weekday,
+                    "from": _format_hour(slot.start),
+                    "to": _format_hour(slot.end),
+                }
+                for slot in dhw.schedule
+            ]
+        elif room is not None:
+            attrs["day_temperature"] = room.day_temperature
+            attrs["night_temperature"] = room.night_temperature
+            attrs["schedule"] = room.schedule
+        return attrs
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set a new target water temperature."""

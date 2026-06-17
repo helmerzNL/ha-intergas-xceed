@@ -17,11 +17,18 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import IntergasXceedDataUpdateCoordinator, XceedRoom
+from .coordinator import IntergasXceedDataUpdateCoordinator, XceedDhw, XceedRoom
 from .entity import IntergasXceedEntity
 
 DEFAULT_MIN_TEMP = 5.0
 DEFAULT_MAX_TEMP = 35.0
+
+# Domestic hot water defaults (used until the wizard read populates bounds).
+DEFAULT_DHW_MIN_TEMP = 40.0
+DEFAULT_DHW_MAX_TEMP = 65.0
+DEFAULT_DHW_STEP = 0.5
+DEFAULT_DHW_COMFORT_START = 6.0
+DEFAULT_DHW_COMFORT_END = 22.0
 
 # The device stores 7 days x 3 switching slots. Only the first slot of each day
 # (the comfort window) is exposed through Home Assistant. Weekday index 0 maps
@@ -95,6 +102,17 @@ SCHEDULE_FIELDS: tuple[XceedScheduleField, ...] = (
     ),
 )
 
+# Domestic hot water setpoints and comfort-window fields (wizard-backed).
+DHW_SETPOINTS: tuple[tuple[str, str], ...] = (
+    ("day", "Day setpoint"),
+    ("night", "Night setpoint"),
+)
+DHW_SCHEDULE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("start", "comfort start"),
+    ("end", "comfort end"),
+)
+DHW_NAME = "Domestic hot water"
+
 
 def _normalized_schedule(room: XceedRoom) -> list[Any]:
     """Return the room schedule padded/truncated to the fixed 21 slots."""
@@ -133,6 +151,22 @@ async def async_setup_entry(
                         field,
                     )
                 )
+
+    # The domestic hot water setpoints and schedule come from the XpertOnly
+    # wizard rather than a room, so they are gated on a DHW circuit existing -
+    # not on the (possibly not-yet-loaded) wizard model. They show as
+    # unavailable until the first wizard read succeeds.
+    if any(room.is_dhw for room in coordinator.data.rooms):
+        for kind, label in DHW_SETPOINTS:
+            entities.append(IntergasXceedDhwSetpointNumber(coordinator, kind, label))
+        for weekday_index, (_weekday_key, weekday_label) in enumerate(WEEKDAYS):
+            for field_key, field_label in DHW_SCHEDULE_FIELDS:
+                entities.append(
+                    IntergasXceedDhwScheduleNumber(
+                        coordinator, weekday_index, weekday_label, field_key, field_label
+                    )
+                )
+
     async_add_entities(entities)
 
 
@@ -303,4 +337,148 @@ class IntergasXceedScheduleNumber(IntergasXceedEntity, NumberEntity):
         slot.setdefault("type", "H")
         schedule[index] = slot
         await self.coordinator.api.async_set_room_schedule(self._room_id, schedule)
+        await self.coordinator.async_request_refresh()
+
+
+class IntergasXceedDhwSetpointNumber(IntergasXceedEntity, NumberEntity):
+    """The domestic hot water day or night setpoint (XpertOnly wizard)."""
+
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_device_class = NumberDeviceClass.TEMPERATURE
+    _attr_mode = NumberMode.BOX
+
+    def __init__(
+        self,
+        coordinator: IntergasXceedDataUpdateCoordinator,
+        kind: str,
+        label: str,
+    ) -> None:
+        """Initialise the DHW setpoint entity."""
+        super().__init__(coordinator)
+        self._kind = kind
+        self._attr_unique_id = f"{self._serial}_dhw_setpoint_{kind}"
+        self._attr_name = f"{DHW_NAME} {label}"
+
+    @property
+    def _dhw(self) -> XceedDhw | None:
+        """Return the DHW model from the latest update."""
+        return self.coordinator.data.dhw
+
+    @property
+    def available(self) -> bool:
+        """Return True once the wizard model has loaded."""
+        dhw = self._dhw
+        return super().available and dhw is not None and dhw.available
+
+    @property
+    def native_min_value(self) -> float:
+        """Return the minimum settable setpoint."""
+        dhw = self._dhw
+        if dhw is not None:
+            value = dhw.day_min if self._kind == "day" else dhw.night_min
+            if value is not None:
+                return value
+        return DEFAULT_DHW_MIN_TEMP
+
+    @property
+    def native_max_value(self) -> float:
+        """Return the maximum settable setpoint."""
+        dhw = self._dhw
+        if dhw is not None:
+            value = dhw.day_max if self._kind == "day" else dhw.night_max
+            if value is not None:
+                return value
+        return DEFAULT_DHW_MAX_TEMP
+
+    @property
+    def native_step(self) -> float:
+        """Return the setpoint resolution."""
+        dhw = self._dhw
+        if dhw is not None:
+            value = dhw.day_step if self._kind == "day" else dhw.night_step
+            if value:
+                return value
+        return DEFAULT_DHW_STEP
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current setpoint."""
+        dhw = self._dhw
+        if dhw is None:
+            return None
+        return dhw.day_setpoint if self._kind == "day" else dhw.night_setpoint
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write a new DHW setpoint via the wizard."""
+        await self.coordinator.api.async_set_dhw_setpoint(self._kind, value)
+        await self.coordinator.async_request_refresh()
+
+
+class IntergasXceedDhwScheduleNumber(IntergasXceedEntity, NumberEntity):
+    """The comfort-window start or end hour of a DHW weekday (wizard)."""
+
+    _attr_native_min_value = 0
+    _attr_native_max_value = 24
+    _attr_native_step = 0.5
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:clock-outline"
+
+    def __init__(
+        self,
+        coordinator: IntergasXceedDataUpdateCoordinator,
+        weekday_index: int,
+        weekday_label: str,
+        field_key: str,
+        field_label: str,
+    ) -> None:
+        """Initialise the DHW schedule hour entity."""
+        super().__init__(coordinator)
+        self._weekday_index = weekday_index
+        self._field_key = field_key
+        self._attr_unique_id = (
+            f"{self._serial}_dhw_schedule_{weekday_index}_{field_key}"
+        )
+        self._attr_name = f"{DHW_NAME} {weekday_label} {field_label}"
+
+    @property
+    def _dhw(self) -> XceedDhw | None:
+        """Return the DHW model from the latest update."""
+        return self.coordinator.data.dhw
+
+    @property
+    def available(self) -> bool:
+        """Return True once the wizard model has loaded."""
+        dhw = self._dhw
+        return super().available and dhw is not None and dhw.available
+
+    def _slot(self) -> Any:
+        """Return the schedule slot for this weekday, if present."""
+        dhw = self._dhw
+        if dhw is None:
+            return None
+        for slot in dhw.schedule:
+            if slot.weekday == self._weekday_index:
+                return slot
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the configured comfort start/end hour, if set."""
+        slot = self._slot()
+        if slot is None:
+            return None
+        return slot.start if self._field_key == "start" else slot.end
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write a new comfort start/end hour via the wizard."""
+        slot = self._slot()
+        start = slot.start if slot and slot.start is not None else DEFAULT_DHW_COMFORT_START
+        end = slot.end if slot and slot.end is not None else DEFAULT_DHW_COMFORT_END
+        if self._field_key == "start":
+            start = value
+        else:
+            end = value
+        await self.coordinator.api.async_set_dhw_schedule_slot(
+            self._weekday_index, start, end
+        )
         await self.coordinator.async_request_refresh()

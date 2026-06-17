@@ -57,6 +57,31 @@ class XceedScene:
 
 
 @dataclass
+class XceedDhwSlot:
+    """A single domestic hot water comfort window for one weekday."""
+
+    weekday: int
+    start: float | None
+    end: float | None
+
+
+@dataclass
+class XceedDhw:
+    """Domestic hot water setpoints + schedule read via the XpertOnly wizard."""
+
+    available: bool = False
+    day_setpoint: float | None = None
+    night_setpoint: float | None = None
+    day_min: float | None = None
+    day_max: float | None = None
+    day_step: float | None = None
+    night_min: float | None = None
+    night_max: float | None = None
+    night_step: float | None = None
+    schedule: list[XceedDhwSlot] = field(default_factory=list)
+
+
+@dataclass
 class XceedData:
     """Parsed read model for the integration."""
 
@@ -65,6 +90,7 @@ class XceedData:
     errors: list[dict[str, Any]] = field(default_factory=list)
     weather: dict[str, Any] = field(default_factory=dict)
     version: dict[str, Any] = field(default_factory=dict)
+    dhw: XceedDhw | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -161,8 +187,49 @@ def _parse(payload: dict[str, Any]) -> XceedData:
         errors=(payload.get("systemstate") or {}).get("errors") or [],
         weather=payload.get("weather") or {},
         version=payload.get("version") or {},
+        dhw=_parse_dhw(payload.get("dhw")),
         raw=payload,
     )
+
+
+def _parse_dhw(payload: dict[str, Any] | None) -> XceedDhw | None:
+    """Convert the raw wizard DHW payload into a typed model."""
+    if not payload:
+        return None
+    day_bounds = payload.get("day_bounds") or {}
+    night_bounds = payload.get("night_bounds") or {}
+    schedule: list[XceedDhwSlot] = []
+    for slot in payload.get("schedule") or []:
+        schedule.append(
+            XceedDhwSlot(
+                weekday=int(slot.get("weekday", 0)),
+                start=_hhmm_to_hour(slot.get("from")),
+                end=_hhmm_to_hour(slot.get("to")),
+            )
+        )
+    return XceedDhw(
+        available=bool(payload.get("available")),
+        day_setpoint=_as_float(payload.get("day_setpoint")),
+        night_setpoint=_as_float(payload.get("night_setpoint")),
+        day_min=_as_float(day_bounds.get("min")),
+        day_max=_as_float(day_bounds.get("max")),
+        day_step=_as_float(day_bounds.get("step")),
+        night_min=_as_float(night_bounds.get("min")),
+        night_max=_as_float(night_bounds.get("max")),
+        night_step=_as_float(night_bounds.get("step")),
+        schedule=schedule,
+    )
+
+
+def _hhmm_to_hour(value: Any) -> float | None:
+    """Convert ``"HH:MM"`` to a decimal hour (``"13:30"`` -> ``13.5``)."""
+    if not value or not isinstance(value, str) or ":" not in value:
+        return None
+    hours, _, minutes = value.partition(":")
+    try:
+        return int(hours) + int(minutes) / 60.0
+    except ValueError:
+        return None
 
 
 def _as_float(value: Any) -> float | None:

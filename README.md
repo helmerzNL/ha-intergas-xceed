@@ -60,7 +60,9 @@ Why:
    - Climate: one entity per heating zone with a writable target temperature
    - Water heater: the domestic hot water (DHW) circuit with a writable setpoint
    - Number: writable day/day2/night comfort setpoints per heating zone, plus
-     per-weekday day-start/night-start hour sliders for the comfort schedule
+     per-weekday day-start/night-start hour sliders for the comfort schedule.
+     For the DHW circuit it also exposes the day and night water setpoints and a
+     per-weekday start/end schedule that mirror the boiler's own menu exactly
    - Sensors: per-room actual/desired/day/night temperatures, outdoor temperature, system status, active modes
    - Binary sensors: cooling, window, comfort mode, and a system problem indicator
    - Switches: one per heatapp! scene (Party, Boost, Holiday, Shower, Leave, Standby, Towel)
@@ -90,6 +92,10 @@ Why:
 - The login, signature flow, and the live runtime `/api/*` endpoints used by the heatapp! app/web UI are confirmed against a real device.
 - Reads (rooms, scenes, system state, weather, schedules) and writes (zone/DHW target temperature, day/day2/night setpoints, weekly schedules, scene activation) are implemented and verified.
 - The domestic hot water circuit requires `change_mode=1` on a temperature write; heating zones use `change_mode=0`. Both are handled automatically.
+- The domestic hot water day/night setpoints and 7-day schedule that are only
+  reachable through the boiler's expert menu are read and written through the
+  heatapp! XpertOnly parameter wizard, so they match the controller menu values
+  one-to-one.
 
 ## Repository status
 

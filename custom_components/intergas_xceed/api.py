@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from hashlib import md5, sha256
 import json
 import logging
+from time import monotonic
 from typing import Any
 
 from aiohttp import ClientError, ClientSession
@@ -17,6 +18,12 @@ from .const import (
     DEFAULT_DEVICE_NAME,
     DEFAULT_UDID,
     DEVICE_TOKEN_IV_B64,
+    DHW_DAY_SETPOINT_PREFIX,
+    DHW_HEATING_MODE_PREFIX,
+    DHW_NIGHT_SETPOINT_PREFIX,
+    DHW_SWITCHING_ENTRY_MARKER,
+    DHW_SWITCHING_PREFIX,
+    DHW_WIZARD_ROOT,
     ENDPOINT_CHALLENGE,
     ENDPOINT_RESPONSE,
     ENDPOINT_ROOM_LIST,
@@ -29,10 +36,30 @@ from .const import (
     ENDPOINT_SYSTEM_STATE,
     ENDPOINT_VERSION,
     ENDPOINT_WEATHER,
+    ENDPOINT_WIZARD_NEXT,
+    ENDPOINT_WIZARD_SAVE,
+    ENDPOINT_WIZARD_START,
+    ENDPOINT_XPERTONLY_START,
     REQUEST_TIMEOUT,
+    WIZARD_MODE_XPERTONLY,
+    WIZARD_REFRESH_INTERVAL,
+    WIZARD_SAVE_TYPE_PARAMETER,
+    WIZARD_SAVE_TYPE_SWITCHINGTIME,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Weekday order of the DHW switching-time list (Monday first, European
+# convention). Used only to build the human-readable wizard ``optiontext``.
+_WIZARD_WEEKDAYS: tuple[str, ...] = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
 
 
 class IntergasXceedApiError(Exception):
@@ -86,6 +113,89 @@ def _serialize_switching_times(
     return "|".join(slots)
 
 
+def _wizard_entries(response: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Return the ``Eintraege`` list from a wizard response, or an empty list."""
+    return ((response or {}).get("heatcom") or {}).get("Eintraege") or []
+
+
+def _strip_literal(value: str | None) -> str | None:
+    """Resolve a HeatCon! text field to its literal string.
+
+    Literal values are prefixed with ``:1`` (e.g. ``":160.0 \u00b0C"`` ->
+    ``"60.0 \u00b0C"``); other ``:NNNN`` values are controller translation
+    keys that we cannot resolve and therefore return unchanged.
+    """
+    if value is None:
+        return None
+    return value[2:] if value.startswith(":1") else value
+
+
+def _parse_wizard_temp(text: str | None) -> float | None:
+    """Parse a literal temperature field such as ``":160.0 \u00b0C"`` -> ``60.0``."""
+    literal = _strip_literal(text)
+    if not literal:
+        return None
+    token = literal.split()[0].replace(",", ".")
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def _parse_wizard_time(text: str | None) -> str | None:
+    """Parse a literal time field: ``":113:00"`` -> ``"13:00"``; empty -> None."""
+    literal = _strip_literal(text)
+    if not literal or literal.startswith("--"):
+        return None
+    return literal
+
+
+def _parse_setpoint_bounds(detail: dict[str, Any]) -> dict[str, float] | None:
+    """Derive min/max/step from the ``Werteliste`` of a setpoint edit detail."""
+    werteliste = ((detail.get("Wertebereich") or {}).get("Werteliste")) or []
+    values: list[float] = []
+    for item in werteliste:
+        try:
+            values.append(float(item["Value"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not values:
+        return None
+    values.sort()
+    step = 0.5
+    if len(values) >= 2:
+        step = round(values[1] - values[0], 3) or 0.5
+    return {"min": values[0], "max": values[-1], "step": step}
+
+
+def _snap_setpoint_key(
+    werteliste: list[dict[str, Any]], celsius: float
+) -> str | None:
+    """Return the ``Key`` whose ``Value`` is closest to the requested value."""
+    best_key: str | None = None
+    best_diff: float | None = None
+    for item in werteliste:
+        try:
+            value = float(item["Value"])
+            key = str(item["Key"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        diff = abs(value - celsius)
+        if best_diff is None or diff < best_diff:
+            best_diff = diff
+            best_key = key
+    return best_key
+
+
+def _format_switchtime(from_hour: float, to_hour: float) -> str:
+    """Serialize a comfort window as the wizard ``"FROM-TO"`` decimal-hour value.
+
+    The controller resolves a 0.5 fraction to ``:30`` and ``.0`` to ``:00``
+    (e.g. ``13.0`` -> 13:00, ``13.5`` -> 13:30).
+    """
+    return f"{from_hour:.1f}-{to_hour:.1f}"
+
+
 class IntergasXceedApiClient:
     """Thin async client around the reverse-engineered local heatapp! API."""
 
@@ -103,6 +213,14 @@ class IntergasXceedApiClient:
         self._auth: _Session | None = None
         self._counter = 0
         self._auth_lock = asyncio.Lock()
+        # DHW XpertOnly wizard state (serialised by its own lock).
+        self._wizard_lock = asyncio.Lock()
+        self._wizard_reqcount = 0
+        self._wizard_ereqcount = 0
+        self._dhw_cache: dict[str, Any] | None = None
+        self._dhw_bounds: dict[str, Any] | None = None
+        self._dhw_dirty = False
+        self._dhw_last_read = 0.0
 
     @property
     def host(self) -> str:
@@ -155,6 +273,12 @@ class IntergasXceedApiClient:
             if result and result.get("switchingtimes") is not None:
                 schedules[rid] = result["switchingtimes"]
 
+        # The DHW day/night setpoints and schedule live behind the XpertOnly
+        # parameter wizard, which forces its own signed session; run it last so
+        # the re-auth it performs cannot disturb the gathers above. It never
+        # raises - on failure it returns the previous cache (or None).
+        dhw = await self._async_get_dhw_cached()
+
         return {
             "version": version or {},
             "rooms": rooms,
@@ -162,6 +286,7 @@ class IntergasXceedApiClient:
             "systemstate": systemstate or {},
             "weather": weather or {},
             "schedules": schedules,
+            "dhw": dhw,
         }
 
     async def async_set_room_temperature(
@@ -258,9 +383,134 @@ class IntergasXceedApiClient:
                 f"{result.get('message') or 'unknown error'}"
             )
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    async def async_set_dhw_setpoint(self, kind: str, celsius: float) -> None:
+        """Write a domestic hot water setpoint (``"day"`` or ``"night"``).
+
+        Navigates the XpertOnly wizard to the relevant setpoint leaf, snaps the
+        requested temperature to the nearest value the controller offers, then
+        saves it. The cache is flagged dirty so the next poll reflects it.
+        """
+        if kind not in ("day", "night"):
+            raise IntergasXceedApiError(f"Unknown DHW setpoint kind {kind!r}")
+        prefix = (
+            DHW_DAY_SETPOINT_PREFIX if kind == "day" else DHW_NIGHT_SETPOINT_PREFIX
+        )
+        label = "Day" if kind == "day" else "Night"
+        async with self._wizard_lock:
+            await self._async_enter_wizard()
+            lvl2 = _wizard_entries(await self._wizard_next(DHW_WIZARD_ROOT))
+            heating_menu = next(
+                (
+                    entry
+                    for entry in lvl2
+                    if str(entry.get("Servercode", "")).startswith(
+                        DHW_HEATING_MODE_PREFIX
+                    )
+                ),
+                None,
+            )
+            if not heating_menu:
+                raise IntergasXceedApiError("DHW heating-mode menu not found")
+            heating = _wizard_entries(
+                await self._wizard_next(heating_menu["Servercode"])
+            )
+            leaf = next(
+                (
+                    entry
+                    for entry in heating
+                    if str(entry.get("Servercode", "")).startswith(prefix)
+                ),
+                None,
+            )
+            if not leaf:
+                raise IntergasXceedApiError(f"DHW {kind} setpoint not found")
+            detail = (
+                await self._wizard_next(leaf["Servercode"])
+            ).get("heatcom") or {}
+            save_servercode = detail.get("Servercode")
+            werteliste = (
+                (detail.get("Wertebereich") or {}).get("Werteliste")
+            ) or []
+            key = _snap_setpoint_key(werteliste, float(celsius))
+            if not save_servercode or key is None:
+                raise IntergasXceedApiError(
+                    "DHW setpoint edit detail was incomplete"
+                )
+            optiontext = f"Domestic hot water  <- Heating mode <- {label} setpoint"
+            result = await self._wizard_save(
+                save_servercode, key, WIZARD_SAVE_TYPE_PARAMETER, optiontext
+            )
+            if result.get("success") is False:
+                raise IntergasXceedApiError(
+                    "Updating the DHW setpoint failed: "
+                    f"{result.get('message') or 'unknown error'}"
+                )
+            self._dhw_dirty = True
+
+    async def async_set_dhw_schedule_slot(
+        self, weekday_index: int, from_hour: float, to_hour: float
+    ) -> None:
+        """Write a domestic hot water comfort window for one weekday.
+
+        ``weekday_index`` is 0=Monday .. 6=Sunday. ``from_hour``/``to_hour`` are
+        decimal hours (``13.0`` -> 13:00, ``13.5`` -> 13:30).
+        """
+        if not 0 <= int(weekday_index) <= 6:
+            raise IntergasXceedApiError(f"Invalid weekday index {weekday_index}")
+        weekday_index = int(weekday_index)
+        async with self._wizard_lock:
+            await self._async_enter_wizard()
+            lvl2 = _wizard_entries(await self._wizard_next(DHW_WIZARD_ROOT))
+            switching_menu = next(
+                (
+                    entry
+                    for entry in lvl2
+                    if str(entry.get("Servercode", "")).startswith(
+                        DHW_SWITCHING_PREFIX
+                    )
+                ),
+                None,
+            )
+            if not switching_menu:
+                raise IntergasXceedApiError("DHW switching-times menu not found")
+            switching = _wizard_entries(
+                await self._wizard_next(switching_menu["Servercode"])
+            )
+            slots = [
+                entry
+                for entry in switching
+                if str(entry.get("FormatNext", "")).startswith(
+                    DHW_SWITCHING_ENTRY_MARKER
+                )
+            ]
+            index = weekday_index * 2
+            if index >= len(slots):
+                raise IntergasXceedApiError(
+                    f"DHW switching slot for weekday {weekday_index} not found"
+                )
+            detail = (
+                await self._wizard_next(slots[index]["Servercode"])
+            ).get("heatcom") or {}
+            save_servercode = detail.get("Servercode")
+            if not save_servercode:
+                raise IntergasXceedApiError(
+                    "DHW switching-time edit detail was incomplete"
+                )
+            value = _format_switchtime(float(from_hour), float(to_hour))
+            optiontext = (
+                "Domestic hot water  <- Switching times <- "
+                f"{_WIZARD_WEEKDAYS[weekday_index]}"
+            )
+            result = await self._wizard_save(
+                save_servercode, value, WIZARD_SAVE_TYPE_SWITCHINGTIME, optiontext
+            )
+            if result.get("success") is False:
+                raise IntergasXceedApiError(
+                    "Updating the DHW schedule failed: "
+                    f"{result.get('message') or 'unknown error'}"
+                )
+            self._dhw_dirty = True
+
     async def _safe_request(
         self, path: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any] | None:
@@ -270,6 +520,241 @@ class IntergasXceedApiClient:
         except IntergasXceedApiError as err:
             _LOGGER.debug("Intergas XCeed request to %s failed: %s", path, err)
             return None
+
+    # ------------------------------------------------------------------
+    # XpertOnly parameter wizard (DHW setpoints + schedule)
+    # ------------------------------------------------------------------
+    async def _async_get_dhw_cached(self) -> dict[str, Any] | None:
+        """Return the DHW wizard read model, throttled and failure-tolerant.
+
+        The wizard tree is re-read at most once per ``WIZARD_REFRESH_INTERVAL``
+        (or immediately after a write flags the cache dirty). Any failure keeps
+        and returns the previous cache so a transient wizard problem never
+        breaks the main read model.
+        """
+        async with self._wizard_lock:
+            now = monotonic()
+            if (
+                not self._dhw_dirty
+                and self._dhw_cache is not None
+                and now - self._dhw_last_read < WIZARD_REFRESH_INTERVAL
+            ):
+                return self._dhw_cache
+            try:
+                await self._async_enter_wizard()
+                payload = await self._async_read_dhw_wizard()
+            except IntergasXceedApiError as err:
+                _LOGGER.debug(
+                    "Intergas XCeed DHW wizard read failed, keeping cache: %s", err
+                )
+                return self._dhw_cache
+            self._dhw_cache = payload
+            self._dhw_last_read = now
+            self._dhw_dirty = False
+            return payload
+
+    async def _async_read_dhw_wizard(self) -> dict[str, Any]:
+        """Read the DHW day/night setpoints and 7-day schedule via the wizard.
+
+        Assumes a wizard session was just entered. Setpoints and the schedule
+        are captured first; the per-setpoint value bounds are read only once
+        (best effort) since they require two extra calls per session.
+        """
+        lvl2 = _wizard_entries(await self._wizard_next(DHW_WIZARD_ROOT))
+        heating_menu = next(
+            (
+                entry
+                for entry in lvl2
+                if str(entry.get("Servercode", "")).startswith(
+                    DHW_HEATING_MODE_PREFIX
+                )
+            ),
+            None,
+        )
+        switching_menu = next(
+            (
+                entry
+                for entry in lvl2
+                if str(entry.get("Servercode", "")).startswith(DHW_SWITCHING_PREFIX)
+            ),
+            None,
+        )
+
+        day_setpoint: float | None = None
+        night_setpoint: float | None = None
+        day_leaf: str | None = None
+        night_leaf: str | None = None
+        if heating_menu:
+            heating = _wizard_entries(
+                await self._wizard_next(heating_menu["Servercode"])
+            )
+            for entry in heating:
+                servercode = str(entry.get("Servercode", ""))
+                if servercode.startswith(DHW_DAY_SETPOINT_PREFIX):
+                    day_setpoint = _parse_wizard_temp(entry.get("Text3"))
+                    day_leaf = servercode
+                elif servercode.startswith(DHW_NIGHT_SETPOINT_PREFIX):
+                    night_setpoint = _parse_wizard_temp(entry.get("Text3"))
+                    night_leaf = servercode
+
+        schedule: list[dict[str, Any]] = []
+        if switching_menu:
+            switching = _wizard_entries(
+                await self._wizard_next(switching_menu["Servercode"])
+            )
+            slots = [
+                entry
+                for entry in switching
+                if str(entry.get("FormatNext", "")).startswith(
+                    DHW_SWITCHING_ENTRY_MARKER
+                )
+            ]
+            for day_index in range(7):
+                index = day_index * 2
+                slot = slots[index] if index < len(slots) else None
+                schedule.append(
+                    {
+                        "weekday": day_index,
+                        "from": _parse_wizard_time(slot.get("Text3"))
+                        if slot
+                        else None,
+                        "to": _parse_wizard_time(slot.get("Text4"))
+                        if slot
+                        else None,
+                    }
+                )
+
+        if self._dhw_bounds is None and (day_leaf or night_leaf):
+            try:
+                bounds: dict[str, Any] = {}
+                if day_leaf:
+                    detail = (await self._wizard_next(day_leaf)).get("heatcom") or {}
+                    bounds["day"] = _parse_setpoint_bounds(detail)
+                if night_leaf:
+                    detail = (
+                        await self._wizard_next(night_leaf)
+                    ).get("heatcom") or {}
+                    bounds["night"] = _parse_setpoint_bounds(detail)
+                self._dhw_bounds = bounds
+            except IntergasXceedApiError as err:
+                _LOGGER.debug(
+                    "Intergas XCeed DHW bounds read failed (will retry): %s", err
+                )
+
+        payload: dict[str, Any] = {
+            "available": True,
+            "day_setpoint": day_setpoint,
+            "night_setpoint": night_setpoint,
+            "schedule": schedule,
+        }
+        if self._dhw_bounds:
+            payload["day_bounds"] = self._dhw_bounds.get("day")
+            payload["night_bounds"] = self._dhw_bounds.get("night")
+        return payload
+
+    async def _async_enter_wizard(self) -> None:
+        """Establish a fresh signed session and open the XpertOnly wizard.
+
+        The heatapp! server expires a signed session after only a handful of
+        calls, so each wizard interaction starts from a clean re-authentication
+        (which also resets the request counter) and replays the web client's
+        priming sequence before ``wizard/start``.
+        """
+        await self._async_force_reauth()
+        await self._async_signed_request(
+            ENDPOINT_SYSTEM_STATE, {"product": "heatapp-server"}
+        )
+        await self._request_get(ENDPOINT_XPERTONLY_START)
+        await self._wizard_start()
+
+    async def _async_force_reauth(self) -> None:
+        """Drop the cached session and authenticate again from scratch."""
+        async with self._auth_lock:
+            self._auth = None
+        await self._async_authenticate()
+
+    async def _wizard_start(self) -> dict[str, Any]:
+        """Open the wizard root menu, pinning the per-session request counter."""
+        if self._auth is None:
+            raise IntergasXceedAuthenticationError("Cannot run wizard without a session")
+        self._counter += 1
+        self._wizard_reqcount = self._counter
+        self._wizard_ereqcount = 0
+        params = {
+            "modus": WIZARD_MODE_XPERTONLY,
+            "code": "",
+            "udid": DEFAULT_UDID,
+            "ereqcount": self._wizard_ereqcount,
+            "reqcount": self._wizard_reqcount,
+            "userid": self._auth.user_id,
+        }
+        return await self._wizard_call(ENDPOINT_WIZARD_START, params)
+
+    async def _wizard_next(self, servercode: str) -> dict[str, Any]:
+        """Navigate one step deeper into the wizard tree."""
+        if self._auth is None:
+            raise IntergasXceedAuthenticationError("Cannot run wizard without a session")
+        self._wizard_ereqcount += 1
+        params = {
+            "servercode": servercode,
+            "code": "",
+            "udid": DEFAULT_UDID,
+            "ereqcount": self._wizard_ereqcount,
+            "reqcount": self._wizard_reqcount,
+            "userid": self._auth.user_id,
+        }
+        return await self._wizard_call(ENDPOINT_WIZARD_NEXT, params)
+
+    async def _wizard_save(
+        self, servercode: str, value: str, type_: str, optiontext: str
+    ) -> dict[str, Any]:
+        """Persist a single value through the wizard save endpoint."""
+        if self._auth is None:
+            raise IntergasXceedAuthenticationError("Cannot run wizard without a session")
+        self._wizard_ereqcount += 1
+        params = {
+            "servercode": servercode,
+            "value": value,
+            "type": type_,
+            "code": "",
+            "optiontext": optiontext,
+            "udid": DEFAULT_UDID,
+            "ereqcount": self._wizard_ereqcount,
+            "reqcount": self._wizard_reqcount,
+            "userid": self._auth.user_id,
+        }
+        return await self._wizard_call(ENDPOINT_WIZARD_SAVE, params)
+
+    async def _wizard_call(
+        self, path: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Sign and POST a wizard request without auto re-authentication.
+
+        Re-authenticating mid-wizard would scramble the request counters, so a
+        rejected session is surfaced as an error (and the cached session
+        dropped) for the caller to abort cleanly.
+        """
+        params["request_signature"] = self._create_signature(params)
+        response = await self._request_form(path, params)
+        if response.get("loginRejected"):
+            self._auth = None
+            raise IntergasXceedApiError(f"Wizard call to {path} was login-rejected")
+        return response
+
+    async def _request_get(self, path: str) -> None:
+        """Issue an unsigned GET (used only to prime XpertOnly mode)."""
+        url = f"http://{self._host}{path}"
+        try:
+            async with self._session.get(
+                url,
+                headers={"X-Requested-With": "XMLHttpRequest"},
+                timeout=REQUEST_TIMEOUT,
+            ) as response:
+                await response.text()
+        except (ClientError, asyncio.TimeoutError) as err:
+            _LOGGER.debug(
+                "Intergas XCeed GET to %s failed: %s", path, err
+            )
 
     async def _async_authenticate(self) -> None:
         """Log in and cache the decrypted device token."""
