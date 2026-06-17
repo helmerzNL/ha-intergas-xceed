@@ -1,0 +1,24 @@
+changelog:
+  exclude:
+    labels:
+      - skip-release-notes
+  categories:
+    - title: Breaking Changes
+      labels:
+        - breaking-change
+    - title: New Features
+      labels:
+        - enhancement
+        - feature
+    - title: Fixes
+      labels:
+        - bug
+        - bugfix
+        - fix
+    - title: Maintenance
+      labels:
+        - chore
+        - ci
+        - dependencies
+        - documentation
+        - refactor
