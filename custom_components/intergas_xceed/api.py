@@ -118,6 +118,20 @@ class IntergasXceedApiClient:
             challenge_response,
             ("challengeToken", "challenge_token", "challengetoken", "token"),
         )
+        direct_device_token = _first_present(
+            challenge_response,
+            ("devicetoken", "deviceToken", "device_token"),
+        )
+        if direct_device_token:
+            _LOGGER.debug(
+                "Intergas XCeed host %s returned a direct device token from the challenge endpoint",
+                self._host,
+            )
+            self._auth = IntergasXceedSession(
+                user_id=str(_first_present(challenge_response, ("userid", "userId", "user_id")) or self._username),
+                device_token=str(direct_device_token),
+            )
+            return
         if not challenge_token:
             _LOGGER.error(
                 "Intergas XCeed host %s returned a challenge response without a token: %s",
@@ -152,8 +166,12 @@ class IntergasXceedApiClient:
             login_response,
             ("devicetoken_encrypted", "deviceTokenEncrypted", "devicetokenencrypted"),
         )
-        user_id = _first_present(login_response, ("userid", "userId", "user_id"))
-        if not encrypted_device_token or not user_id:
+        direct_device_token = _first_present(
+            login_response,
+            ("devicetoken", "deviceToken", "device_token"),
+        )
+        user_id = _first_present(login_response, ("userid", "userId", "user_id")) or self._username
+        if not encrypted_device_token and not direct_device_token:
             _LOGGER.error(
                 "Intergas XCeed host %s returned an incomplete login response: %s",
                 self._host,
@@ -163,7 +181,11 @@ class IntergasXceedApiClient:
 
         self._auth = IntergasXceedSession(
             user_id=str(user_id),
-            device_token=self._decrypt_device_token(str(encrypted_device_token)),
+            device_token=(
+                self._decrypt_device_token(str(encrypted_device_token))
+                if encrypted_device_token
+                else str(direct_device_token)
+            ),
         )
         _LOGGER.debug("Authenticated against Intergas XCeed at %s", self._host)
 
