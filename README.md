@@ -2,6 +2,8 @@
 
 Intergas XCeed Heatpump investigation and Home Assistant integration strategy.
 
+[![Open your Home Assistant instance and add this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=helmerzNL&repository=ha-intergas-xceed&category=integration)
+
 ## Goal
 
 The current MQTT setup only exposes a small subset of telemetry, mostly temperatures.  
