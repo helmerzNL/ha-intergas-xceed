@@ -25,6 +25,14 @@ class IntergasXceedSensorDescription(SensorEntityDescription):
     value_transform: Callable[[Any], Any] | None = None
 
 
+def _coerce_float(value: Any) -> float | None:
+    """Convert numeric strings to floats."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 SENSORS: tuple[IntergasXceedSensorDescription, ...] = (
     IntergasXceedSensorDescription(
         key="controller_time",
@@ -127,11 +135,3 @@ class IntergasXceedSensor(IntergasXceedCoordinatorEntity, SensorEntity):
         if value is None or self.entity_description.value_transform is None:
             return value
         return self.entity_description.value_transform(value)
-
-
-def _coerce_float(value: Any) -> float | None:
-    """Convert numeric strings to floats."""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
