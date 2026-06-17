@@ -46,7 +46,8 @@ Why:
 3. **Entities**
    - Climate: one entity per heating zone with a writable target temperature
    - Water heater: the domestic hot water (DHW) circuit with a writable setpoint
-   - Number: writable day/day2/night comfort setpoints per heating zone
+   - Number: writable day/day2/night comfort setpoints per heating zone, plus
+     per-weekday day-start/night-start hour sliders for the comfort schedule
    - Sensors: per-room actual/desired/day/night temperatures, outdoor temperature, system status, active modes
    - Binary sensors: cooling, window, comfort mode, and a system problem indicator
    - Switches: one per heatapp! scene (Party, Boost, Holiday, Shower, Leave, Standby, Towel)
@@ -87,7 +88,8 @@ Included:
 - API client with the confirmed login/signature flow and AES device-token decryption
 - Polling data update coordinator with a typed device model
 - Climate, water heater, number, sensor, binary sensor, and switch platforms backed by the live API
-- A `set_schedule` service for writing weekly switching times
+- A `set_schedule` service for writing weekly switching times, plus per-weekday
+  day-start/night-start hour sliders for the comfort schedule
 - Diagnostics export
 - English and Dutch translations
 
