@@ -1,2 +1,87 @@
 # ha-intergas-xceed
-Add-on Investigation for Intergas XCeed Heathpump
+
+Intergas XCeed Heatpump investigation and Home Assistant integration strategy.
+
+## Goal
+
+The current MQTT setup only exposes a small subset of telemetry, mostly temperatures.  
+The target is a real Home Assistant integration that exposes both read-only status and the settings that are configurable in the Intergas app/web UI.
+
+## Recommended direction
+
+Build a **local custom integration** that talks to the heater directly over its HTTP API instead of relying only on MQTT.
+
+Why:
+- MQTT is useful for a few live values, but it does not cover the full control surface.
+- The reverse-engineered login and signed `/admin/*` calls already give a stable base for authenticated access.
+- A custom integration can expose entities, services, diagnostics, and future automation hooks in a native HA way.
+
+## Architecture
+
+1. **API client**
+   - Challenge/response login
+   - Session token handling
+   - Signature generation for `/admin/*`
+   - Token refresh / reconnect logic
+
+2. **Coordinator**
+   - Polls runtime state on an interval
+   - Normalizes API responses into a single device model
+   - Keeps write operations separate from refresh polling
+
+3. **Entities**
+   - Sensors: temperatures, system info, pressure, status, errors
+   - Numbers/selects/switches: setpoints, modes, schedules, DHW settings, pump options
+   - Binary sensors: active heating, hot water request, fault state
+
+4. **Services**
+   - Write operations for settings that do not map cleanly to an entity
+   - Actions like sync, refresh, reboot, schedule apply, parameter set
+
+5. **Diagnostics**
+   - API version
+   - Auth state
+   - Last payloads
+   - Sanitized config snapshots
+
+## Practical implementation order
+
+1. Confirm the runtime data endpoint that powers the app/web UI.
+2. Build a read-only integration first.
+3. Add native write entities for the most important settings.
+4. Add service-based writes for advanced or grouped configuration.
+5. Keep MQTT as an optional fallback, not the primary interface.
+
+## Suggested first milestones
+
+- Inventory all app/web configurable fields and group them by HA platform type.
+- Map each field to one of: sensor, number, select, switch, or service.
+- Verify which values can be read from the runtime endpoint versus admin config endpoints.
+- Implement one end-to-end path: login -> poll -> expose entities -> change one setting.
+
+## Current status
+
+- Login and signed admin endpoints are confirmed.
+- `/api/air_control/allData` still needs the runtime control path to be verified.
+- The next useful step is to find the endpoint that returns the complete live plant model and writable parameters.
+
+## Repository status
+
+This repository now contains a **HACS-publishable custom integration scaffold** in `custom_components/intergas_xceed`.
+
+Included:
+- HACS metadata (`hacs.json`)
+- Home Assistant manifest and config flow
+- API client with the confirmed login/signature flow
+- Polling coordinator
+- Initial diagnostic sensor and binary sensor entities
+- Diagnostics export
+- English and Dutch translations
+
+## Short-term roadmap
+
+1. Validate the exact response shape of the confirmed `/admin/*` endpoints against a real device.
+2. Add entity mappings for all discovered read-only values.
+3. Reverse-engineer the runtime control endpoint used by the app for live control data.
+4. Add writable HA platforms (`number`, `select`, `switch`, `button`) for app-configurable settings.
+5. Add tests and CI before publishing through HACS.

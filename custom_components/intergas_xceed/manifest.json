@@ -1,0 +1,18 @@
+{
+  "domain": "intergas_xceed",
+  "name": "Intergas XCeed",
+  "codeowners": [
+    "@helmerzNL"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/helmerzNL/ha-intergas-xceed",
+  "issue_tracker": "https://github.com/helmerzNL/ha-intergas-xceed/issues",
+  "iot_class": "local_polling",
+  "loggers": [
+    "custom_components.intergas_xceed"
+  ],
+  "requirements": [
+    "pycryptodomex>=3.23.0"
+  ],
+  "version": "0.1.0"
+}

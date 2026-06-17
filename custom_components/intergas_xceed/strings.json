@@ -1,0 +1,67 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Intergas XCeed",
+        "description": "Configure the local XCeed controller connection.",
+        "data": {
+          "host": "Host or IP address",
+          "username": "Username",
+          "password": "Password",
+          "scan_interval": "Update interval (seconds)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the Intergas XCeed controller.",
+      "invalid_auth": "Authentication failed.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This controller is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "controller_time": {
+        "name": "Controller time"
+      },
+      "lan_ip_address": {
+        "name": "LAN IP address"
+      },
+      "wifi_ssid": {
+        "name": "Wi-Fi SSID"
+      },
+      "wifi_signal": {
+        "name": "Wi-Fi signal"
+      },
+      "portal_hostname": {
+        "name": "Portal hostname"
+      },
+      "parameter_sync_progress": {
+        "name": "Parameter sync progress"
+      }
+    },
+    "binary_sensor": {
+      "portal_enabled": {
+        "name": "Portal enabled"
+      },
+      "wifi_connected": {
+        "name": "Wi-Fi connected"
+      },
+      "parameter_sync_busy": {
+        "name": "Parameter sync active"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Intergas XCeed options",
+        "data": {
+          "scan_interval": "Update interval (seconds)"
+        }
+      }
+    }
+  }
+}

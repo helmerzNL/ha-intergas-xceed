@@ -1,0 +1,13 @@
+{
+  "name": "Intergas XCeed",
+  "content_in_root": false,
+  "domains": [
+    "intergas_xceed"
+  ],
+  "country": [
+    "NL",
+    "BE"
+  ],
+  "homeassistant": "2025.6.0",
+  "render_readme": true
+}

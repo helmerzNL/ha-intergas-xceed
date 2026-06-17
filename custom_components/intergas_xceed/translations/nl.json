@@ -1,0 +1,67 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Verbinden met Intergas XCeed",
+        "description": "Configureer de lokale verbinding met de XCeed-controller.",
+        "data": {
+          "host": "Hostnaam of IP-adres",
+          "username": "Gebruikersnaam",
+          "password": "Wachtwoord",
+          "scan_interval": "Update-interval (seconden)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbinden met de Intergas XCeed-controller is mislukt.",
+      "invalid_auth": "Aanmelden is mislukt.",
+      "unknown": "Onverwachte fout."
+    },
+    "abort": {
+      "already_configured": "Deze controller is al geconfigureerd."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "controller_time": {
+        "name": "Controller-tijd"
+      },
+      "lan_ip_address": {
+        "name": "LAN IP-adres"
+      },
+      "wifi_ssid": {
+        "name": "Wi-Fi SSID"
+      },
+      "wifi_signal": {
+        "name": "Wi-Fi-signaal"
+      },
+      "portal_hostname": {
+        "name": "Portal-hostnaam"
+      },
+      "parameter_sync_progress": {
+        "name": "Parameter-sync voortgang"
+      }
+    },
+    "binary_sensor": {
+      "portal_enabled": {
+        "name": "Portal ingeschakeld"
+      },
+      "wifi_connected": {
+        "name": "Wi-Fi verbonden"
+      },
+      "parameter_sync_busy": {
+        "name": "Parameter-sync actief"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Intergas XCeed opties",
+        "data": {
+          "scan_interval": "Update-interval (seconden)"
+        }
+      }
+    }
+  }
+}
