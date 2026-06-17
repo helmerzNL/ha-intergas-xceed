@@ -4,8 +4,6 @@
   <img src="./icon.png" alt="Intergas XCeed logo" width="180">
 </p>
 
-Intergas XCeed Heatpump investigation and Home Assistant integration strategy.
-
 [![Open your Home Assistant instance and add this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=helmerzNL&repository=ha-intergas-xceed&category=integration)
 
 ## Installation
@@ -15,6 +13,17 @@ Intergas XCeed Heatpump investigation and Home Assistant integration strategy.
 3. Install **Intergas XCeed** from HACS.
 4. Restart Home Assistant.
 5. Add the integration from **Settings -> Devices & Services**.
+
+## Background: heatapp! software
+
+The Intergas XCeed heat pump is not controlled directly. Its app and web
+interface are powered by the **heatapp!** software, which runs on a local
+gateway/server on your network. Whenever you change a setting in the Intergas
+app or web UI, you are really talking to that heatapp! server.
+
+This integration communicates with the same local heatapp! API. That is why it
+can expose far more than the handful of temperatures available over MQTT,
+including the configurable settings that the app/web interface offers.
 
 ## Goal
 
