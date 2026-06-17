@@ -14,16 +14,20 @@
 4. Restart Home Assistant.
 5. Add the integration from **Settings -> Devices & Services**.
 
-## Background: heatapp! software
+## Background: heatcon! controller and heatapp! software
 
-The Intergas XCeed heat pump is not controlled directly. Its app and web
-interface are powered by the **heatapp!** software, which runs on a local
-gateway/server on your network. Whenever you change a setting in the Intergas
-app or web UI, you are really talking to that heatapp! server.
+The Intergas XCeed is built around an **EBV heatcon!** system controller
+(EBV GmbH). heatcon! is an OEM control platform for heat pumps and other heat
+sources, which Intergas ships under its own branding inside the XCeed.
 
-This integration communicates with the same local heatapp! API. That is why it
-can expose far more than the handful of temperatures available over MQTT,
-including the configurable settings that the app/web interface offers.
+The controller is operated through the **heatapp!** app and web interface,
+which talk to a local gateway/server on your network. Whenever you change a
+setting in the Intergas app or web UI, you are really talking to that
+heatapp! / heatcon! server.
+
+This integration communicates with the same local API. That is why it can
+expose far more than the handful of temperatures available over MQTT, including
+the configurable settings that the app/web interface offers.
 
 ## Goal
 
