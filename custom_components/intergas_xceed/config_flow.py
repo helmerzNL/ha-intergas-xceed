@@ -12,7 +12,11 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import IntergasXceedApiClient, IntergasXceedApiError, IntergasXceedAuthenticationError
+from .api import (
+    IntergasXceedApiClient,
+    IntergasXceedApiError,
+    IntergasXceedInvalidAuthError,
+)
 from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
 
 
@@ -44,7 +48,7 @@ class IntergasXceedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 await api.async_test_connection()
-            except IntergasXceedAuthenticationError:
+            except IntergasXceedInvalidAuthError:
                 errors["base"] = "invalid_auth"
             except IntergasXceedApiError:
                 errors["base"] = "cannot_connect"

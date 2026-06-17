@@ -24,6 +24,10 @@ class IntergasXceedAuthenticationError(IntergasXceedApiError):
     """Raised when authentication fails."""
 
 
+class IntergasXceedInvalidAuthError(IntergasXceedAuthenticationError):
+    """Raised when the device explicitly rejects the supplied credentials."""
+
+
 @dataclass
 class IntergasXceedSession:
     """Authenticated session details."""
@@ -107,10 +111,10 @@ class IntergasXceedApiClient:
         )
         challenge_token = _first_present(
             challenge_response,
-            ("challengeToken", "challenge_token", "token"),
+            ("challengeToken", "challenge_token", "challengetoken", "token"),
         )
         if not challenge_token:
-            raise IntergasXceedAuthenticationError("Challenge token missing from response")
+            raise IntergasXceedApiError("Challenge token missing from response")
 
         password_hash = md5(f"{self._password}{challenge_token}".encode("utf-8"), usedforsecurity=False).hexdigest()
         login_response = await self._request_json(
@@ -126,15 +130,15 @@ class IntergasXceedApiClient:
         )
 
         if self._looks_like_auth_failure(login_response):
-            raise IntergasXceedAuthenticationError("The device rejected the supplied credentials")
+            raise IntergasXceedInvalidAuthError("The device rejected the supplied credentials")
 
         encrypted_device_token = _first_present(
             login_response,
-            ("devicetoken_encrypted", "deviceTokenEncrypted"),
+            ("devicetoken_encrypted", "deviceTokenEncrypted", "devicetokenencrypted"),
         )
-        user_id = _first_present(login_response, ("userid", "userId"))
+        user_id = _first_present(login_response, ("userid", "userId", "user_id"))
         if not encrypted_device_token or not user_id:
-            raise IntergasXceedAuthenticationError("Login response is missing token information")
+            raise IntergasXceedApiError("Login response is missing token information")
 
         self._auth = IntergasXceedSession(
             user_id=str(user_id),
@@ -199,18 +203,37 @@ class IntergasXceedApiClient:
         """Best-effort detection for auth failures."""
         candidates = {
             str(value).lower()
-            for key, value in payload.items()
+            for current in _iter_payload_dicts(payload)
+            for key, value in current.items()
             if key.lower() in {"status", "result", "message", "error"}
         }
-        return "loginrejected" in candidates or "authfailed" in candidates
+        return any(
+            marker in candidate
+            for candidate in candidates
+            for marker in ("loginrejected", "login rejected", "authfailed", "auth failed", "invalid credential")
+        )
 
 
 def _first_present(payload: dict[str, Any], keys: tuple[str, ...]) -> Any | None:
     """Return the first present key from a response payload."""
-    for key in keys:
-        if key in payload and payload[key] not in (None, ""):
-            return payload[key]
+    normalized_keys = {key.lower() for key in keys}
+    for current in _iter_payload_dicts(payload):
+        lowercase_map = {key.lower(): key for key in current}
+        for normalized_key in normalized_keys:
+            actual_key = lowercase_map.get(normalized_key)
+            if actual_key is not None and current[actual_key] not in (None, ""):
+                return current[actual_key]
     return None
+
+
+def _iter_payload_dicts(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Yield the top-level payload plus common nested response wrappers."""
+    payloads = [payload]
+    for wrapper_key in ("data", "result", "response", "payload"):
+        nested = payload.get(wrapper_key)
+        if isinstance(nested, dict):
+            payloads.append(nested)
+    return payloads
 
 
 def _normalize_signature_value(value: Any) -> str:
