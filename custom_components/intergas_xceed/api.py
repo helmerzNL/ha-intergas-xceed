@@ -61,8 +61,12 @@ class IntergasXceedApiClient:
 
     async def async_test_connection(self) -> dict[str, Any]:
         """Validate credentials and fetch a small dashboard snapshot."""
-        await self._async_authenticate()
-        return await self.async_get_dashboard()
+        try:
+            await self._async_authenticate()
+            return await self.async_get_dashboard()
+        except IntergasXceedApiError:
+            _LOGGER.exception("Intergas XCeed test connection failed for host %s", self._host)
+            raise
 
     async def async_get_dashboard(self) -> dict[str, Any]:
         """Return the current aggregated read model."""
@@ -115,6 +119,11 @@ class IntergasXceedApiClient:
             ("challengeToken", "challenge_token", "challengetoken", "token"),
         )
         if not challenge_token:
+            _LOGGER.error(
+                "Intergas XCeed host %s returned a challenge response without a token: %s",
+                self._host,
+                _summarize_payload(challenge_response),
+            )
             raise IntergasXceedApiError("Challenge token missing from response")
 
         password_hash = md5(f"{self._password}{challenge_token}".encode("utf-8"), usedforsecurity=False).hexdigest()
@@ -131,6 +140,12 @@ class IntergasXceedApiClient:
         )
 
         if self._looks_like_auth_failure(login_response):
+            _LOGGER.error(
+                "Intergas XCeed host %s rejected login for user %s: %s",
+                self._host,
+                self._username,
+                _summarize_payload(login_response),
+            )
             raise IntergasXceedInvalidAuthError("The device rejected the supplied credentials")
 
         encrypted_device_token = _first_present(
@@ -139,6 +154,11 @@ class IntergasXceedApiClient:
         )
         user_id = _first_present(login_response, ("userid", "userId", "user_id"))
         if not encrypted_device_token or not user_id:
+            _LOGGER.error(
+                "Intergas XCeed host %s returned an incomplete login response: %s",
+                self._host,
+                _summarize_payload(login_response),
+            )
             raise IntergasXceedApiError("Login response is missing token information")
 
         self._auth = IntergasXceedSession(
@@ -165,9 +185,22 @@ class IntergasXceedApiClient:
             ) as response:
                 response_text = await response.text()
         except ClientError as err:
+            _LOGGER.error(
+                "Intergas XCeed request failed for host %s path %s: %s",
+                self._host,
+                path,
+                err,
+            )
             raise IntergasXceedApiError(f"Request to {path} failed: {err}") from err
 
         if response.status >= 400:
+            _LOGGER.error(
+                "Intergas XCeed host %s path %s returned HTTP %s: %s",
+                self._host,
+                path,
+                response.status,
+                _summarize_response_text(response_text),
+            )
             raise IntergasXceedApiError(
                 f"Request to {path} failed with HTTP {response.status}: "
                 f"{_summarize_response_text(response_text)}"
@@ -176,11 +209,23 @@ class IntergasXceedApiClient:
         try:
             data = json.loads(response_text)
         except json.JSONDecodeError as err:
+            _LOGGER.error(
+                "Intergas XCeed host %s path %s returned invalid JSON: %s",
+                self._host,
+                path,
+                _summarize_response_text(response_text),
+            )
             raise IntergasXceedApiError(
                 f"Request to {path} did not return valid JSON: {_summarize_response_text(response_text)}"
             ) from err
 
         if not isinstance(data, dict):
+            _LOGGER.error(
+                "Intergas XCeed host %s path %s returned a non-object payload: %s",
+                self._host,
+                path,
+                _summarize_response_text(response_text),
+            )
             raise IntergasXceedApiError(f"Request to {path} returned a non-object payload")
 
         return data
@@ -257,6 +302,17 @@ def _normalize_signature_value(value: Any) -> str:
 def _summarize_response_text(response_text: str, limit: int = 200) -> str:
     """Return a compact single-line snippet for loggable response bodies."""
     compact = " ".join(response_text.split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[:limit]}..."
+
+
+def _summarize_payload(payload: dict[str, Any], limit: int = 200) -> str:
+    """Return a compact loggable snippet for JSON payloads."""
+    try:
+        compact = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
+    except TypeError:
+        compact = str(payload)
     if len(compact) <= limit:
         return compact
     return f"{compact[:limit]}..."
