@@ -21,39 +21,6 @@
       "already_configured": "This controller is already configured."
     }
   },
-  "entity": {
-    "sensor": {
-      "controller_time": {
-        "name": "Controller time"
-      },
-      "lan_ip_address": {
-        "name": "LAN IP address"
-      },
-      "wifi_ssid": {
-        "name": "Wi-Fi SSID"
-      },
-      "wifi_signal": {
-        "name": "Wi-Fi signal"
-      },
-      "portal_hostname": {
-        "name": "Portal hostname"
-      },
-      "parameter_sync_progress": {
-        "name": "Parameter sync progress"
-      }
-    },
-    "binary_sensor": {
-      "portal_enabled": {
-        "name": "Portal enabled"
-      },
-      "wifi_connected": {
-        "name": "Wi-Fi connected"
-      },
-      "parameter_sync_busy": {
-        "name": "Parameter sync active"
-      }
-    }
-  },
   "options": {
     "step": {
       "init": {
