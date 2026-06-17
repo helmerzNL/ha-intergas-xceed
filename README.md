@@ -44,19 +44,15 @@ Why:
    - Keeps write operations separate from refresh polling
 
 3. **Entities**
-   - Sensors: temperatures, system info, pressure, status, errors
-   - Numbers/selects/switches: setpoints, modes, schedules, DHW settings, pump options
-   - Binary sensors: active heating, hot water request, fault state
+   - Climate: one entity per heating zone with a writable target temperature
+   - Water heater: the domestic hot water (DHW) circuit with a writable setpoint
+   - Sensors: per-room actual/desired/day/night temperatures, outdoor temperature, system status, active modes
+   - Binary sensors: cooling, window, comfort mode, and a system problem indicator
+   - Switches: one per heatapp! scene (Party, Boost, Holiday, Shower, Leave, Standby, Towel)
 
-4. **Services**
-   - Write operations for settings that do not map cleanly to an entity
-   - Actions like sync, refresh, reboot, schedule apply, parameter set
-
-5. **Diagnostics**
-   - API version
-   - Auth state
-   - Last payloads
-   - Sanitized config snapshots
+4. **Diagnostics**
+   - API version and device information
+   - Last aggregated payload (redacted)
 
 ## Practical implementation order
 
@@ -75,20 +71,20 @@ Why:
 
 ## Current status
 
-- Login and signed admin endpoints are confirmed.
-- `/api/air_control/allData` still needs the runtime control path to be verified.
-- The next useful step is to find the endpoint that returns the complete live plant model and writable parameters.
+- The login, signature flow, and the live runtime `/api/*` endpoints used by the heatapp! app/web UI are confirmed against a real device.
+- Reads (rooms, scenes, system state, weather, schedules) and writes (zone/DHW target temperature, scene activation) are implemented and verified.
+- The domestic hot water circuit requires `change_mode=1` on a temperature write; heating zones use `change_mode=0`. Both are handled automatically.
 
 ## Repository status
 
-This repository now contains a **HACS-publishable custom integration scaffold** in `custom_components/intergas_xceed`.
+This repository contains a **HACS-publishable custom integration** in `custom_components/intergas_xceed`.
 
 Included:
 - HACS metadata (`hacs.json`)
 - Home Assistant manifest and config flow
-- API client with the confirmed login/signature flow
-- Polling coordinator
-- Initial diagnostic sensor and binary sensor entities
+- API client with the confirmed login/signature flow and AES device-token decryption
+- Polling data update coordinator with a typed device model
+- Climate, water heater, sensor, binary sensor, and switch platforms backed by the live API
 - Diagnostics export
 - English and Dutch translations
 
@@ -107,8 +103,7 @@ This repository includes:
 
 ## Short-term roadmap
 
-1. Validate the exact response shape of the confirmed `/admin/*` endpoints against a real device.
-2. Add entity mappings for all discovered read-only values.
-3. Reverse-engineer the runtime control endpoint used by the app for live control data.
-4. Add writable HA platforms (`number`, `select`, `switch`, `button`) for app-configurable settings.
-5. Add tests and CI before publishing through HACS.
+1. Expose writable day/night/day2 setpoints once a stable write endpoint is confirmed.
+2. Add writable weekly schedules (currently read-only, surfaced as attributes).
+3. Map any remaining app/web configurable fields to `number`/`select`/`button` platforms.
+4. Add tests and CI.

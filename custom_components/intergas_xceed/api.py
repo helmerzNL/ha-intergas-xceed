@@ -1,7 +1,8 @@
-"""HTTP client for Intergas XCeed."""
+"""Async HTTP client for the Intergas XCeed / heatapp! local server."""
 
 from __future__ import annotations
 
+import asyncio
 from base64 import b64decode
 from dataclasses import dataclass
 from hashlib import md5, sha256
@@ -12,7 +13,22 @@ from typing import Any
 from aiohttp import ClientError, ClientSession
 from Cryptodome.Cipher import AES
 
-from .const import DEFAULT_DEVICE_NAME, DEFAULT_UDID, DEVICE_TOKEN_IV_B64, REQUEST_TIMEOUT
+from .const import (
+    DEFAULT_DEVICE_NAME,
+    DEFAULT_UDID,
+    DEVICE_TOKEN_IV_B64,
+    ENDPOINT_CHALLENGE,
+    ENDPOINT_RESPONSE,
+    ENDPOINT_ROOM_LIST,
+    ENDPOINT_ROOM_SET_TEMPERATURE,
+    ENDPOINT_SCENE_SET,
+    ENDPOINT_SCENE_STATUS,
+    ENDPOINT_SWITCHING_TIMES_GET,
+    ENDPOINT_SYSTEM_STATE,
+    ENDPOINT_VERSION,
+    ENDPOINT_WEATHER,
+    REQUEST_TIMEOUT,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,16 +46,15 @@ class IntergasXceedInvalidAuthError(IntergasXceedAuthenticationError):
 
 
 @dataclass
-class IntergasXceedSession:
-    """Authenticated session details."""
+class _Session:
+    """Authenticated session state."""
 
     user_id: str
     device_token: str
-    request_counter: int = 0
 
 
 class IntergasXceedApiClient:
-    """Thin async client around the reverse-engineered local API."""
+    """Thin async client around the reverse-engineered local heatapp! API."""
 
     def __init__(
         self,
@@ -52,162 +67,239 @@ class IntergasXceedApiClient:
         self._username = username
         self._password = password
         self._session = session
-        self._auth: IntergasXceedSession | None = None
+        self._auth: _Session | None = None
+        self._counter = 0
+        self._auth_lock = asyncio.Lock()
 
     @property
     def host(self) -> str:
         """Return the configured host."""
         return self._host
 
+    # ------------------------------------------------------------------
+    # Public high level API
+    # ------------------------------------------------------------------
     async def async_test_connection(self) -> dict[str, Any]:
-        """Validate credentials and fetch a small dashboard snapshot."""
+        """Validate credentials and return device version information."""
         try:
             await self._async_authenticate()
-            return await self.async_get_dashboard()
+            return await self._async_signed_request(ENDPOINT_VERSION)
         except IntergasXceedApiError:
-            _LOGGER.exception("Intergas XCeed test connection failed for host %s", self._host)
+            _LOGGER.exception(
+                "Intergas XCeed test connection failed for host %s", self._host
+            )
             raise
 
-    async def async_get_dashboard(self) -> dict[str, Any]:
-        """Return the current aggregated read model."""
-        return {
-            "system_information": await self.async_admin_request("/admin/systeminformation/get"),
-            "network": await self.async_admin_request("/admin/network/info"),
-            "datetime": await self.async_admin_request("/admin/datetime/get"),
-            "portal": await self.async_admin_request("/admin/portal/get"),
-            "parameter_check": await self.async_admin_request("/admin/parameter/check"),
-            "parameter_progress": await self.async_admin_request("/admin/parameter/progress"),
-        }
-
-    async def async_admin_request(
-        self,
-        path: str,
-        payload: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Call a signed admin endpoint."""
+    async def async_get_data(self) -> dict[str, Any]:
+        """Fetch the full read model from the device."""
         await self._async_authenticate()
 
-        if self._auth is None:
-            raise IntergasXceedAuthenticationError("Authentication state is missing")
+        version, rooms, scenes, systemstate, weather = await asyncio.gather(
+            self._safe_request(ENDPOINT_VERSION),
+            self._safe_request(ENDPOINT_ROOM_LIST),
+            self._safe_request(ENDPOINT_SCENE_STATUS),
+            self._safe_request(ENDPOINT_SYSTEM_STATE),
+            self._safe_request(ENDPOINT_WEATHER),
+        )
 
-        request_payload = dict(payload or {})
-        self._auth.request_counter += 1
-        request_payload["reqcount"] = self._auth.request_counter
-        request_payload["udid"] = DEFAULT_UDID
-        request_payload["userid"] = self._auth.user_id
-        request_payload["request_signature"] = self._create_signature(request_payload)
+        if rooms is None:
+            raise IntergasXceedApiError("Device did not return a room list")
 
-        response = await self._request_json("POST", path, request_payload)
-        if self._looks_like_auth_failure(response):
-            self._auth = None
-            await self._async_authenticate()
-            return await self.async_admin_request(path, payload)
+        room_ids: list[int] = []
+        for group in rooms.get("groups") or []:
+            for room in group.get("rooms") or []:
+                if room.get("id") is not None:
+                    room_ids.append(int(room["id"]))
 
-        return response
+        schedule_results = await asyncio.gather(
+            *(
+                self._safe_request(ENDPOINT_SWITCHING_TIMES_GET, {"roomid": rid})
+                for rid in room_ids
+            )
+        )
+        schedules: dict[int, Any] = {}
+        for rid, result in zip(room_ids, schedule_results):
+            if result and result.get("switchingtimes") is not None:
+                schedules[rid] = result["switchingtimes"]
+
+        return {
+            "version": version or {},
+            "rooms": rooms,
+            "scenes": scenes or {},
+            "systemstate": systemstate or {},
+            "weather": weather or {},
+            "schedules": schedules,
+        }
+
+    async def async_set_room_temperature(
+        self, room_id: int, temperature: float, change_mode: int = 0
+    ) -> None:
+        """Set the desired temperature for a room/zone.
+
+        Heating zones accept ``change_mode=0`` (override until the next
+        switch point); the domestic hot water circuit rejects mode 0 with a
+        ``heatcom_error`` and requires ``change_mode=1``.
+        """
+        if float(temperature).is_integer():
+            value: float | int = int(temperature)
+        else:
+            value = round(float(temperature), 1)
+        result = await self._async_signed_request(
+            ENDPOINT_ROOM_SET_TEMPERATURE,
+            {
+                "roomid": int(room_id),
+                "change_mode": int(change_mode),
+                "temperature": value,
+            },
+        )
+        if result.get("success") is False:
+            raise IntergasXceedApiError(
+                "Setting the temperature failed: "
+                f"{result.get('message') or 'unknown error'}"
+            )
+
+    async def async_set_scene(
+        self, scene: str, active: bool, duration: int = 1
+    ) -> None:
+        """Activate or deactivate a heatapp! scene (operating mode)."""
+        result = await self._async_signed_request(
+            ENDPOINT_SCENE_SET,
+            {"scene": scene, "active": 1 if active else 0, "duration": int(duration)},
+        )
+        if result.get("success") is False:
+            raise IntergasXceedApiError(
+                f"Setting scene {scene} failed: {result.get('message') or 'unknown error'}"
+            )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    async def _safe_request(
+        self, path: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        """Run a signed request, returning None on a per-endpoint failure."""
+        try:
+            return await self._async_signed_request(path, payload)
+        except IntergasXceedApiError as err:
+            _LOGGER.debug("Intergas XCeed request to %s failed: %s", path, err)
+            return None
 
     async def _async_authenticate(self) -> None:
         """Log in and cache the decrypted device token."""
-        if self._auth is not None:
-            return
+        async with self._auth_lock:
+            if self._auth is not None:
+                return
 
-        challenge_response = await self._request_json(
-            "POST",
-            "/api/user/token/challenge",
-            {"udid": DEFAULT_UDID},
-        )
-        challenge_token = _first_present(
-            challenge_response,
-            ("challengeToken", "challenge_token", "challengetoken", "token"),
-        )
-        direct_device_token = _first_present(
-            challenge_response,
-            ("devicetoken", "deviceToken", "device_token"),
-        )
-        if direct_device_token:
-            _LOGGER.debug(
-                "Intergas XCeed host %s returned a direct device token from the challenge endpoint",
-                self._host,
+            challenge = await self._request_form(
+                ENDPOINT_CHALLENGE, {"udid": DEFAULT_UDID}
             )
-            self._auth = IntergasXceedSession(
-                user_id=str(_first_present(challenge_response, ("userid", "userId", "user_id")) or self._username),
-                device_token=str(direct_device_token),
+            nonce = challenge.get("devicetoken")
+            if not nonce:
+                _LOGGER.error(
+                    "Intergas XCeed host %s returned no challenge nonce: %s",
+                    self._host,
+                    challenge,
+                )
+                raise IntergasXceedApiError("Challenge nonce missing from response")
+
+            hashed = md5(
+                f"{self._password}{nonce}".encode("utf-8"), usedforsecurity=False
+            ).hexdigest()
+            login = await self._request_form(
+                ENDPOINT_RESPONSE,
+                {
+                    "login": self._username,
+                    "devicename": DEFAULT_DEVICE_NAME,
+                    "token": nonce,
+                    "hashed": hashed,
+                    "udid": DEFAULT_UDID,
+                },
             )
-            return
-        if not challenge_token:
-            _LOGGER.error(
-                "Intergas XCeed host %s returned a challenge response without a token: %s",
-                self._host,
-                _summarize_payload(challenge_response),
+
+            if login.get("loginRejected") or not login.get("success", True):
+                _LOGGER.error(
+                    "Intergas XCeed host %s rejected login for user %s",
+                    self._host,
+                    self._username,
+                )
+                raise IntergasXceedInvalidAuthError(
+                    "The device rejected the supplied credentials"
+                )
+
+            encrypted = login.get("devicetoken_encrypted")
+            user_id = login.get("userid")
+            if not encrypted or user_id is None:
+                _LOGGER.error(
+                    "Intergas XCeed host %s returned an incomplete login response",
+                    self._host,
+                )
+                raise IntergasXceedApiError("Login response is missing token information")
+
+            self._auth = _Session(
+                user_id=str(user_id),
+                device_token=self._decrypt_device_token(str(encrypted)),
             )
-            raise IntergasXceedApiError("Challenge token missing from response")
+            self._counter = 0
+            _LOGGER.debug("Authenticated against Intergas XCeed at %s", self._host)
 
-        password_hash = md5(f"{self._password}{challenge_token}".encode("utf-8"), usedforsecurity=False).hexdigest()
-        login_response = await self._request_json(
-            "POST",
-            "/api/user/token/response",
-            {
-                "login": self._username,
-                "devicename": DEFAULT_DEVICE_NAME,
-                "token": challenge_token,
-                "hashed": password_hash,
-                "udid": DEFAULT_UDID,
-            },
-        )
-
-        if self._looks_like_auth_failure(login_response):
-            _LOGGER.error(
-                "Intergas XCeed host %s rejected login for user %s: %s",
-                self._host,
-                self._username,
-                _summarize_payload(login_response),
-            )
-            raise IntergasXceedInvalidAuthError("The device rejected the supplied credentials")
-
-        encrypted_device_token = _first_present(
-            login_response,
-            ("devicetoken_encrypted", "deviceTokenEncrypted", "devicetokenencrypted"),
-        )
-        direct_device_token = _first_present(
-            login_response,
-            ("devicetoken", "deviceToken", "device_token"),
-        )
-        user_id = _first_present(login_response, ("userid", "userId", "user_id")) or self._username
-        if not encrypted_device_token and not direct_device_token:
-            _LOGGER.error(
-                "Intergas XCeed host %s returned an incomplete login response: %s",
-                self._host,
-                _summarize_payload(login_response),
-            )
-            raise IntergasXceedApiError("Login response is missing token information")
-
-        self._auth = IntergasXceedSession(
-            user_id=str(user_id),
-            device_token=(
-                self._decrypt_device_token(str(encrypted_device_token))
-                if encrypted_device_token
-                else str(direct_device_token)
-            ),
-        )
-        _LOGGER.debug("Authenticated against Intergas XCeed at %s", self._host)
-
-    async def _request_json(
-        self,
-        method: str,
-        path: str,
-        payload: dict[str, Any] | None = None,
+    async def _async_signed_request(
+        self, path: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Issue a JSON request against the device."""
-        url = f"http://{self._host}{path}"
+        """Issue a signed request, re-authenticating once on rejection."""
+        await self._async_authenticate()
+        if self._auth is None:
+            raise IntergasXceedAuthenticationError("Authentication state is missing")
 
+        params: dict[str, Any] = {
+            "udid": DEFAULT_UDID,
+            "reqcount": self._next_counter(),
+            "userid": self._auth.user_id,
+        }
+        if payload:
+            params.update(payload)
+        params["request_signature"] = self._create_signature(params)
+
+        response = await self._request_form(path, params)
+        if response.get("loginRejected"):
+            self._auth = None
+            await self._async_authenticate()
+            return await self._async_signed_request(path, payload)
+        return response
+
+    def _next_counter(self) -> int:
+        """Return the next request counter value (0-based, like the app)."""
+        value = self._counter
+        self._counter += 1
+        return value
+
+    def _create_signature(self, params: dict[str, Any]) -> str:
+        """Create the md5 request signature the API expects."""
+        if self._auth is None:
+            raise IntergasXceedAuthenticationError("Cannot sign without a session")
+        message = "".join(
+            f"{key}={_normalize(params[key])}|"
+            for key in sorted(params)
+            if key != "request_signature"
+        )
+        return md5(
+            f"{message}{self._auth.device_token}".encode("utf-8"),
+            usedforsecurity=False,
+        ).hexdigest()
+
+    async def _request_form(
+        self, path: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Issue a form-encoded POST request and parse the JSON response."""
+        url = f"http://{self._host}{path}"
         try:
-            async with self._session.request(
-                method,
+            async with self._session.post(
                 url,
-                json=payload,
+                data={key: _normalize(value) for key, value in payload.items()},
+                headers={"X-Requested-With": "XMLHttpRequest"},
                 timeout=REQUEST_TIMEOUT,
             ) as response:
-                response_text = await response.text()
-        except ClientError as err:
+                text = await response.text()
+        except (ClientError, asyncio.TimeoutError) as err:
             _LOGGER.error(
                 "Intergas XCeed request failed for host %s path %s: %s",
                 self._host,
@@ -217,125 +309,37 @@ class IntergasXceedApiClient:
             raise IntergasXceedApiError(f"Request to {path} failed: {err}") from err
 
         if response.status >= 400:
-            _LOGGER.error(
-                "Intergas XCeed host %s path %s returned HTTP %s: %s",
-                self._host,
-                path,
-                response.status,
-                _summarize_response_text(response_text),
-            )
             raise IntergasXceedApiError(
-                f"Request to {path} failed with HTTP {response.status}: "
-                f"{_summarize_response_text(response_text)}"
+                f"Request to {path} failed with HTTP {response.status}"
             )
 
         try:
-            data = json.loads(response_text)
+            data = json.loads(text)
         except json.JSONDecodeError as err:
-            _LOGGER.error(
-                "Intergas XCeed host %s path %s returned invalid JSON: %s",
-                self._host,
-                path,
-                _summarize_response_text(response_text),
-            )
             raise IntergasXceedApiError(
-                f"Request to {path} did not return valid JSON: {_summarize_response_text(response_text)}"
+                f"Request to {path} did not return valid JSON"
             ) from err
 
         if not isinstance(data, dict):
-            _LOGGER.error(
-                "Intergas XCeed host %s path %s returned a non-object payload: %s",
-                self._host,
-                path,
-                _summarize_response_text(response_text),
-            )
             raise IntergasXceedApiError(f"Request to {path} returned a non-object payload")
-
         return data
 
-    def _create_signature(self, payload: dict[str, Any]) -> str:
-        """Create the md5 signature the admin API expects."""
-        if self._auth is None:
-            raise IntergasXceedAuthenticationError("Cannot sign request without an auth session")
-
-        message = "|".join(
-            f"{key}={_normalize_signature_value(payload[key])}"
-            for key in sorted(payload)
-            if key != "request_signature"
-        )
-        return md5(f"{message}{self._auth.device_token}".encode("utf-8"), usedforsecurity=False).hexdigest()
-
     def _decrypt_device_token(self, encrypted_token: str) -> str:
-        """Decrypt the device token returned by the login response."""
+        """Decrypt the AES-256-CBC encrypted device token."""
         key = sha256(self._password.encode("utf-8")).digest()
         iv = b64decode(DEVICE_TOKEN_IV_B64)
         encrypted_bytes = b64decode(encrypted_token)
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        decrypted = cipher.decrypt(encrypted_bytes)
+        decrypted = AES.new(key, AES.MODE_CBC, iv).decrypt(encrypted_bytes)
         padding_length = decrypted[-1]
         if padding_length < 1 or padding_length > AES.block_size:
-            raise IntergasXceedAuthenticationError("Received an invalid encrypted device token")
+            raise IntergasXceedAuthenticationError(
+                "Received an invalid encrypted device token"
+            )
         return decrypted[:-padding_length].decode("utf-8")
 
-    @staticmethod
-    def _looks_like_auth_failure(payload: dict[str, Any]) -> bool:
-        """Best-effort detection for auth failures."""
-        candidates = {
-            str(value).lower()
-            for current in _iter_payload_dicts(payload)
-            for key, value in current.items()
-            if key.lower() in {"status", "result", "message", "error"}
-        }
-        return any(
-            marker in candidate
-            for candidate in candidates
-            for marker in ("loginrejected", "login rejected", "authfailed", "auth failed", "invalid credential")
-        )
 
-
-def _first_present(payload: dict[str, Any], keys: tuple[str, ...]) -> Any | None:
-    """Return the first present key from a response payload."""
-    normalized_keys = {key.lower() for key in keys}
-    for current in _iter_payload_dicts(payload):
-        lowercase_map = {key.lower(): key for key in current}
-        for normalized_key in normalized_keys:
-            actual_key = lowercase_map.get(normalized_key)
-            if actual_key is not None and current[actual_key] not in (None, ""):
-                return current[actual_key]
-    return None
-
-
-def _iter_payload_dicts(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """Yield the top-level payload plus common nested response wrappers."""
-    payloads = [payload]
-    for wrapper_key in ("data", "result", "response", "payload"):
-        nested = payload.get(wrapper_key)
-        if isinstance(nested, dict):
-            payloads.append(nested)
-    return payloads
-
-
-def _normalize_signature_value(value: Any) -> str:
-    """Normalize request values to the format the signature algorithm expects."""
+def _normalize(value: Any) -> str:
+    """Normalise a value for the request body and signature."""
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
-
-
-def _summarize_response_text(response_text: str, limit: int = 200) -> str:
-    """Return a compact single-line snippet for loggable response bodies."""
-    compact = " ".join(response_text.split())
-    if len(compact) <= limit:
-        return compact
-    return f"{compact[:limit]}..."
-
-
-def _summarize_payload(payload: dict[str, Any], limit: int = 200) -> str:
-    """Return a compact loggable snippet for JSON payloads."""
-    try:
-        compact = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
-    except TypeError:
-        compact = str(payload)
-    if len(compact) <= limit:
-        return compact
-    return f"{compact[:limit]}..."

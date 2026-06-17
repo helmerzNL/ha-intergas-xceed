@@ -21,39 +21,6 @@
       "already_configured": "Deze controller is al geconfigureerd."
     }
   },
-  "entity": {
-    "sensor": {
-      "controller_time": {
-        "name": "Controller-tijd"
-      },
-      "lan_ip_address": {
-        "name": "LAN IP-adres"
-      },
-      "wifi_ssid": {
-        "name": "Wi-Fi SSID"
-      },
-      "wifi_signal": {
-        "name": "Wi-Fi-signaal"
-      },
-      "portal_hostname": {
-        "name": "Portal-hostnaam"
-      },
-      "parameter_sync_progress": {
-        "name": "Parameter-sync voortgang"
-      }
-    },
-    "binary_sensor": {
-      "portal_enabled": {
-        "name": "Portal ingeschakeld"
-      },
-      "wifi_connected": {
-        "name": "Wi-Fi verbonden"
-      },
-      "parameter_sync_busy": {
-        "name": "Parameter-sync actief"
-      }
-    }
-  },
   "options": {
     "step": {
       "init": {

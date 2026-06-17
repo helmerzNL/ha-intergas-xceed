@@ -2,22 +2,74 @@
 
 from __future__ import annotations
 
-from numbers import Number
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import IntergasXceedDataUpdateCoordinator
-from .entity import (
-    IntergasXceedCoordinatorEntity,
-    iter_leaf_paths,
-    path_to_name,
-    path_to_object_id,
-    resolve_path_value,
+from .coordinator import IntergasXceedDataUpdateCoordinator, XceedRoom
+from .entity import IntergasXceedEntity
+
+
+@dataclass(frozen=True, kw_only=True)
+class XceedRoomSensorDescription(SensorEntityDescription):
+    """Describes a per-room temperature sensor."""
+
+    value_fn: Callable[[XceedRoom], float | None]
+
+
+ROOM_SENSORS: tuple[XceedRoomSensorDescription, ...] = (
+    XceedRoomSensorDescription(
+        key="actual_temperature",
+        name="Actual temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda room: room.current_temperature,
+    ),
+    XceedRoomSensorDescription(
+        key="desired_temperature",
+        name="Desired temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda room: room.target_temperature,
+    ),
+    XceedRoomSensorDescription(
+        key="day_temperature",
+        name="Day temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda room: room.day_temperature,
+    ),
+    XceedRoomSensorDescription(
+        key="day2_temperature",
+        name="Day 2 temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda room: room.day2_temperature,
+    ),
+    XceedRoomSensorDescription(
+        key="night_temperature",
+        name="Night temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda room: room.night_temperature,
+    ),
 )
 
 
@@ -26,38 +78,145 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the sensor platform."""
+    """Set up the sensor entities."""
     coordinator: IntergasXceedDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        IntergasXceedSensor(coordinator, entry, path)
-        for path, value in iter_leaf_paths(coordinator.data)
-        if _is_sensor_value(value)
-    )
+
+    entities: list[SensorEntity] = [
+        IntergasXceedWeatherSensor(coordinator),
+        IntergasXceedSystemStatusSensor(coordinator),
+        IntergasXceedActiveScenesSensor(coordinator),
+    ]
+    for room in coordinator.data.rooms:
+        for description in ROOM_SENSORS:
+            if description.value_fn(room) is None:
+                continue
+            entities.append(
+                IntergasXceedRoomSensor(coordinator, room.id, room.name, description)
+            )
+
+    async_add_entities(entities)
 
 
-class IntergasXceedSensor(IntergasXceedCoordinatorEntity, SensorEntity):
-    """Representation of an Intergas XCeed sensor."""
+class IntergasXceedRoomSensor(IntergasXceedEntity, SensorEntity):
+    """A per-room temperature sensor."""
+
+    entity_description: XceedRoomSensorDescription
 
     def __init__(
         self,
         coordinator: IntergasXceedDataUpdateCoordinator,
-        entry: ConfigEntry,
-        path: tuple[str, ...],
+        room_id: int,
+        room_name: str,
+        description: XceedRoomSensorDescription,
     ) -> None:
-        """Initialize the sensor."""
+        """Initialise the room sensor."""
         super().__init__(coordinator)
-        self._path = path
-        self._attr_name = path_to_name(path)
-        self._attr_unique_id = f"{entry.unique_id or coordinator.api.host}_{path_to_object_id(path)}"
+        self._room_id = room_id
+        self.entity_description = description
+        self._attr_unique_id = f"{self._serial}_{room_id}_{description.key}"
+        self._attr_name = f"{room_name} {description.name}"
 
     @property
-    def native_value(self) -> Any:
-        """Return the current value."""
-        return resolve_path_value(self.coordinator.data, self._path)
+    def _room(self) -> XceedRoom | None:
+        for room in self.coordinator.data.rooms:
+            if room.id == self._room_id:
+                return room
+        return None
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._room is not None
+
+    @property
+    def native_value(self) -> float | None:
+        room = self._room
+        if room is None:
+            return None
+        return self.entity_description.value_fn(room)
 
 
-def _is_sensor_value(value: Any) -> bool:
-    """Return True if the payload value should be exposed as a sensor."""
-    if value is None or isinstance(value, bool):
-        return False
-    return isinstance(value, (str, Number))
+class IntergasXceedWeatherSensor(IntergasXceedEntity, SensorEntity):
+    """Outdoor temperature reported by the device."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_name = "Outdoor temperature"
+
+    def __init__(self, coordinator: IntergasXceedDataUpdateCoordinator) -> None:
+        """Initialise the outdoor temperature sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._serial}_outdoor_temperature"
+
+    @property
+    def native_value(self) -> float | None:
+        value = self.coordinator.data.weather.get("temperature")
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        weather = self.coordinator.data.weather
+        return {
+            "min": weather.get("min"),
+            "max": weather.get("max"),
+            "location": weather.get("forlocation"),
+        }
+
+
+class IntergasXceedSystemStatusSensor(IntergasXceedEntity, SensorEntity):
+    """Aggregated system status / error sensor."""
+
+    _attr_name = "System status"
+
+    def __init__(self, coordinator: IntergasXceedDataUpdateCoordinator) -> None:
+        """Initialise the system status sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._serial}_system_status"
+
+    @property
+    def native_value(self) -> str:
+        errors = self.coordinator.data.errors
+        if not errors:
+            return "OK"
+        first = errors[0]
+        return (
+            first.get("message")
+            or first.get("Fehlertext")
+            or str(first.get("code"))
+            or "Error"
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        errors = self.coordinator.data.errors
+        return {
+            "error_count": len(errors),
+            "errors": errors,
+        }
+
+
+class IntergasXceedActiveScenesSensor(IntergasXceedEntity, SensorEntity):
+    """Sensor listing the currently active scenes (operating modes)."""
+
+    _attr_name = "Active modes"
+
+    def __init__(self, coordinator: IntergasXceedDataUpdateCoordinator) -> None:
+        """Initialise the active scenes sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._serial}_active_modes"
+
+    @property
+    def native_value(self) -> str:
+        active = [scene.name for scene in self.coordinator.data.scenes if scene.active]
+        return ", ".join(active) if active else "None"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "active_modes": [
+                scene.name for scene in self.coordinator.data.scenes if scene.active
+            ],
+        }
