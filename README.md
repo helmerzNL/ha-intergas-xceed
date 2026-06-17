@@ -61,8 +61,10 @@ Why:
    - Water heater: the domestic hot water (DHW) circuit with a writable setpoint
    - Number: writable day/day2/night comfort setpoints per heating zone, plus
      per-weekday day-start/night-start hour sliders for the comfort schedule.
-     For the DHW circuit it also exposes the day and night water setpoints and a
-     per-weekday start/end schedule that mirror the boiler's own menu exactly
+     For the DHW circuit it also exposes the day and night water setpoints that
+     mirror the boiler's own menu exactly
+   - Time: per-weekday domestic hot water comfort window start/end pickers
+     (HH:MM, snapped to the 10-minute grid the controller supports)
    - Sensors: per-room actual/desired/day/night temperatures, outdoor temperature, system status, active modes
    - Binary sensors: cooling, window, comfort mode, and a system problem indicator
    - Switches: one per heatapp! scene (Party, Boost, Holiday, Shower, Leave, Standby, Towel)
@@ -95,7 +97,10 @@ Why:
 - The domestic hot water day/night setpoints and 7-day schedule that are only
   reachable through the boiler's expert menu are read and written through the
   heatapp! XpertOnly parameter wizard, so they match the controller menu values
-  one-to-one.
+  one-to-one. The comfort window start/end are exposed as `time` entities with
+  10-minute granularity (the controller's switching-time encoding is HH.MM with
+  literal minutes, not decimal hours). The heating-zone schedule sliders remain
+  whole-hour, matching their own `/api/room` switching-time API.
 
 ## Repository status
 
@@ -106,7 +111,7 @@ Included:
 - Home Assistant manifest and config flow
 - API client with the confirmed login/signature flow and AES device-token decryption
 - Polling data update coordinator with a typed device model
-- Climate, water heater, number, sensor, binary sensor, and switch platforms backed by the live API
+- Climate, water heater, number, time, sensor, binary sensor, and switch platforms backed by the live API
 - A `set_schedule` service for writing weekly switching times, plus per-weekday
   day-start/night-start hour sliders for the comfort schedule
 - Diagnostics export

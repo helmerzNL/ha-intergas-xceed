@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from base64 import b64decode
 from dataclasses import dataclass
+from datetime import time
 from hashlib import md5, sha256
 import json
 import logging
@@ -187,13 +188,23 @@ def _snap_setpoint_key(
     return best_key
 
 
-def _format_switchtime(from_hour: float, to_hour: float) -> str:
-    """Serialize a comfort window as the wizard ``"FROM-TO"`` decimal-hour value.
+def _format_switchtime(from_time: time, to_time: time) -> str:
+    """Serialize a comfort window as the wizard ``"FROM-TO"`` value.
 
-    The controller resolves a 0.5 fraction to ``:30`` and ``.0`` to ``:00``
-    (e.g. ``13.0`` -> 13:00, ``13.5`` -> 13:30).
+    The controller encodes each bound as ``HH.MM`` with literal, zero-padded
+    minutes snapped to the 10-minute grid it supports (e.g. ``13:30`` ->
+    ``"13.30"``, ``13:00`` -> ``"13.00"``). The digits after the dot are the
+    minute count, NOT a decimal-hour fraction: ``"13.5"`` would be read as
+    13:05, which is why the old decimal serialization snapped half-hours back
+    to the whole hour.
     """
-    return f"{from_hour:.1f}-{to_hour:.1f}"
+    return f"{_clock_value(from_time)}-{_clock_value(to_time)}"
+
+
+def _clock_value(value: time) -> str:
+    """Render a ``datetime.time`` as ``HH.MM`` snapped to the 10-minute grid."""
+    minute = min(int(value.minute / 10 + 0.5), 5) * 10
+    return f"{value.hour:02d}.{minute:02d}"
 
 
 class IntergasXceedApiClient:
@@ -448,12 +459,13 @@ class IntergasXceedApiClient:
             self._dhw_dirty = True
 
     async def async_set_dhw_schedule_slot(
-        self, weekday_index: int, from_hour: float, to_hour: float
+        self, weekday_index: int, from_time: time, to_time: time
     ) -> None:
         """Write a domestic hot water comfort window for one weekday.
 
-        ``weekday_index`` is 0=Monday .. 6=Sunday. ``from_hour``/``to_hour`` are
-        decimal hours (``13.0`` -> 13:00, ``13.5`` -> 13:30).
+        ``weekday_index`` is 0=Monday .. 6=Sunday. ``from_time``/``to_time`` are
+        ``datetime.time`` values; minutes are snapped to the 10-minute grid the
+        controller supports (e.g. ``13:30`` -> ``"13.30"``).
         """
         if not 0 <= int(weekday_index) <= 6:
             raise IntergasXceedApiError(f"Invalid weekday index {weekday_index}")
@@ -496,7 +508,7 @@ class IntergasXceedApiClient:
                 raise IntergasXceedApiError(
                     "DHW switching-time edit detail was incomplete"
                 )
-            value = _format_switchtime(float(from_hour), float(to_hour))
+            value = _format_switchtime(from_time, to_time)
             optiontext = (
                 "Domestic hot water  <- Switching times <- "
                 f"{_WIZARD_WEEKDAYS[weekday_index]}"

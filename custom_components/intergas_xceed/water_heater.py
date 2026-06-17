@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import time
 from typing import Any
 
 from homeassistant.components.water_heater import (
@@ -31,16 +32,11 @@ _WEEKDAY_NAMES = (
 )
 
 
-def _format_hour(value: float | None) -> str | None:
-    """Format a decimal hour (``13.5``) as ``"HH:MM"`` (``"13:30"``)."""
+def _format_time(value: time | None) -> str | None:
+    """Format a ``datetime.time`` (``time(13, 30)``) as ``"HH:MM"`` (``"13:30"``)."""
     if value is None:
         return None
-    hours = int(value)
-    minutes = int(round((value - hours) * 60))
-    if minutes == 60:
-        hours += 1
-        minutes = 0
-    return f"{hours:02d}:{minutes:02d}"
+    return f"{value.hour:02d}:{value.minute:02d}"
 
 
 async def async_setup_entry(
@@ -135,8 +131,8 @@ class IntergasXceedWaterHeater(IntergasXceedEntity, WaterHeaterEntity):
                     "weekday": _WEEKDAY_NAMES[slot.weekday]
                     if 0 <= slot.weekday < len(_WEEKDAY_NAMES)
                     else slot.weekday,
-                    "from": _format_hour(slot.start),
-                    "to": _format_hour(slot.end),
+                    "from": _format_time(slot.start),
+                    "to": _format_time(slot.end),
                 }
                 for slot in dhw.schedule
             ]

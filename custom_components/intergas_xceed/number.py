@@ -27,8 +27,6 @@ DEFAULT_MAX_TEMP = 35.0
 DEFAULT_DHW_MIN_TEMP = 40.0
 DEFAULT_DHW_MAX_TEMP = 65.0
 DEFAULT_DHW_STEP = 0.5
-DEFAULT_DHW_COMFORT_START = 6.0
-DEFAULT_DHW_COMFORT_END = 22.0
 
 # The device stores 7 days x 3 switching slots. Only the first slot of each day
 # (the comfort window) is exposed through Home Assistant. Weekday index 0 maps
@@ -107,10 +105,6 @@ DHW_SETPOINTS: tuple[tuple[str, str], ...] = (
     ("day", "Day setpoint"),
     ("night", "Night setpoint"),
 )
-DHW_SCHEDULE_FIELDS: tuple[tuple[str, str], ...] = (
-    ("start", "comfort start"),
-    ("end", "comfort end"),
-)
 DHW_NAME = "Domestic hot water"
 
 
@@ -159,13 +153,6 @@ async def async_setup_entry(
     if any(room.is_dhw for room in coordinator.data.rooms):
         for kind, label in DHW_SETPOINTS:
             entities.append(IntergasXceedDhwSetpointNumber(coordinator, kind, label))
-        for weekday_index, (_weekday_key, weekday_label) in enumerate(WEEKDAYS):
-            for field_key, field_label in DHW_SCHEDULE_FIELDS:
-                entities.append(
-                    IntergasXceedDhwScheduleNumber(
-                        coordinator, weekday_index, weekday_label, field_key, field_label
-                    )
-                )
 
     async_add_entities(entities)
 
@@ -411,74 +398,4 @@ class IntergasXceedDhwSetpointNumber(IntergasXceedEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Write a new DHW setpoint via the wizard."""
         await self.coordinator.api.async_set_dhw_setpoint(self._kind, value)
-        await self.coordinator.async_request_refresh()
-
-
-class IntergasXceedDhwScheduleNumber(IntergasXceedEntity, NumberEntity):
-    """The comfort-window start or end hour of a DHW weekday (wizard)."""
-
-    _attr_native_min_value = 0
-    _attr_native_max_value = 24
-    _attr_native_step = 0.5
-    _attr_mode = NumberMode.BOX
-    _attr_icon = "mdi:clock-outline"
-
-    def __init__(
-        self,
-        coordinator: IntergasXceedDataUpdateCoordinator,
-        weekday_index: int,
-        weekday_label: str,
-        field_key: str,
-        field_label: str,
-    ) -> None:
-        """Initialise the DHW schedule hour entity."""
-        super().__init__(coordinator)
-        self._weekday_index = weekday_index
-        self._field_key = field_key
-        self._attr_unique_id = (
-            f"{self._serial}_dhw_schedule_{weekday_index}_{field_key}"
-        )
-        self._attr_name = f"{DHW_NAME} {weekday_label} {field_label}"
-
-    @property
-    def _dhw(self) -> XceedDhw | None:
-        """Return the DHW model from the latest update."""
-        return self.coordinator.data.dhw
-
-    @property
-    def available(self) -> bool:
-        """Return True once the wizard model has loaded."""
-        dhw = self._dhw
-        return super().available and dhw is not None and dhw.available
-
-    def _slot(self) -> Any:
-        """Return the schedule slot for this weekday, if present."""
-        dhw = self._dhw
-        if dhw is None:
-            return None
-        for slot in dhw.schedule:
-            if slot.weekday == self._weekday_index:
-                return slot
-        return None
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the configured comfort start/end hour, if set."""
-        slot = self._slot()
-        if slot is None:
-            return None
-        return slot.start if self._field_key == "start" else slot.end
-
-    async def async_set_native_value(self, value: float) -> None:
-        """Write a new comfort start/end hour via the wizard."""
-        slot = self._slot()
-        start = slot.start if slot and slot.start is not None else DEFAULT_DHW_COMFORT_START
-        end = slot.end if slot and slot.end is not None else DEFAULT_DHW_COMFORT_END
-        if self._field_key == "start":
-            start = value
-        else:
-            end = value
-        await self.coordinator.api.async_set_dhw_schedule_slot(
-            self._weekday_index, start, end
-        )
         await self.coordinator.async_request_refresh()

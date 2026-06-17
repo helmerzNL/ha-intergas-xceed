@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import time, timedelta
 import logging
 from typing import Any
 
@@ -61,8 +61,8 @@ class XceedDhwSlot:
     """A single domestic hot water comfort window for one weekday."""
 
     weekday: int
-    start: float | None
-    end: float | None
+    start: time | None
+    end: time | None
 
 
 @dataclass
@@ -203,8 +203,8 @@ def _parse_dhw(payload: dict[str, Any] | None) -> XceedDhw | None:
         schedule.append(
             XceedDhwSlot(
                 weekday=int(slot.get("weekday", 0)),
-                start=_hhmm_to_hour(slot.get("from")),
-                end=_hhmm_to_hour(slot.get("to")),
+                start=_hhmm_to_time(slot.get("from")),
+                end=_hhmm_to_time(slot.get("to")),
             )
         )
     return XceedDhw(
@@ -221,14 +221,14 @@ def _parse_dhw(payload: dict[str, Any] | None) -> XceedDhw | None:
     )
 
 
-def _hhmm_to_hour(value: Any) -> float | None:
-    """Convert ``"HH:MM"`` to a decimal hour (``"13:30"`` -> ``13.5``)."""
+def _hhmm_to_time(value: Any) -> time | None:
+    """Convert ``"HH:MM"`` to a ``datetime.time`` (``"13:30"`` -> ``time(13, 30)``)."""
     if not value or not isinstance(value, str) or ":" not in value:
         return None
     hours, _, minutes = value.partition(":")
     try:
-        return int(hours) + int(minutes) / 60.0
-    except ValueError:
+        return time(hour=int(hours), minute=int(minutes))
+    except (ValueError, TypeError):
         return None
 
 
