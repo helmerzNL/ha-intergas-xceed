@@ -63,12 +63,13 @@ Why:
      setpoint that mirrors the boiler menu exactly; the day entity also
      carries the weekly comfort schedule as an attribute. Both report whether
      the circuit is currently in its comfort or reduced window
-   - Number: writable day/day2/night comfort setpoints per heating zone, plus
-     per-weekday day-start/night-start hour sliders for the comfort schedule.
-     For the DHW circuit it also exposes the day and night water setpoints that
+   - Number: writable day/day2/night comfort setpoints per heating zone. For
+     the DHW circuit it also exposes the day and night water setpoints that
      mirror the boiler's own menu exactly
    - Time: per-weekday domestic hot water comfort window start/end pickers
-     (HH:MM, snapped to the 10-minute grid the controller supports)
+     (HH:MM, snapped to the 10-minute grid the controller supports), plus
+     per-weekday day-start/night-start pickers for each heating zone's comfort
+     schedule (whole-hour granularity, matching the boiler menu)
    - Sensors: per-room actual/desired/day/night temperatures, outdoor temperature, system status, active modes
    - Binary sensors: cooling, window, comfort mode, and a system problem indicator
    - Switches: one per heatapp! scene (Party, Boost, Holiday, Shower, Leave, Standby, Towel)
@@ -103,8 +104,9 @@ Why:
   heatapp! XpertOnly parameter wizard, so they match the controller menu values
   one-to-one. The comfort window start/end are exposed as `time` entities with
   10-minute granularity (the controller's switching-time encoding is HH.MM with
-  literal minutes, not decimal hours). The heating-zone schedule sliders remain
-  whole-hour, matching their own `/api/room` switching-time API.
+  literal minutes, not decimal hours). The heating-zone day-start/night-start
+  schedule is exposed as whole-hour `time` entities, matching its own
+  `/api/room` switching-time API.
 
 ## Repository status
 
@@ -117,7 +119,7 @@ Included:
 - Polling data update coordinator with a typed device model
 - Climate, water heater, number, time, sensor, binary sensor, and switch platforms backed by the live API
 - A `set_schedule` service for writing weekly switching times, plus per-weekday
-  day-start/night-start hour sliders for the comfort schedule
+  day-start/night-start `time` pickers for the comfort schedule
 - Diagnostics export
 - English and Dutch translations
 

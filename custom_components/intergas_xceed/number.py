@@ -1,10 +1,9 @@
-"""Number platform for Intergas XCeed comfort setpoints and schedule."""
+"""Number platform for Intergas XCeed comfort setpoints."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 from homeassistant.components.number import (
     NumberDeviceClass,
@@ -27,24 +26,6 @@ DEFAULT_MAX_TEMP = 35.0
 DEFAULT_DHW_MIN_TEMP = 40.0
 DEFAULT_DHW_MAX_TEMP = 65.0
 DEFAULT_DHW_STEP = 0.5
-
-# The device stores 7 days x 3 switching slots. Only the first slot of each day
-# (the comfort window) is exposed through Home Assistant. Weekday index 0 maps
-# to Monday, following the European convention used by the heatapp! app.
-SLOTS_PER_DAY = 3
-SCHEDULE_LENGTH = 7 * SLOTS_PER_DAY
-DEFAULT_DAY_START = 6
-DEFAULT_NIGHT_START = 22
-
-WEEKDAYS: tuple[tuple[str, str], ...] = (
-    ("monday", "Monday"),
-    ("tuesday", "Tuesday"),
-    ("wednesday", "Wednesday"),
-    ("thursday", "Thursday"),
-    ("friday", "Friday"),
-    ("saturday", "Saturday"),
-    ("sunday", "Sunday"),
-)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -75,45 +56,12 @@ SETPOINTS: tuple[XceedSetpointDescription, ...] = (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
-class XceedScheduleField:
-    """Describes one editable hour of a weekday comfort window."""
-
-    key: str
-    label: str
-    slot_key: str
-    default: int
-
-
-SCHEDULE_FIELDS: tuple[XceedScheduleField, ...] = (
-    XceedScheduleField(
-        key="day_start",
-        label="day start",
-        slot_key="from",
-        default=DEFAULT_DAY_START,
-    ),
-    XceedScheduleField(
-        key="night_start",
-        label="night start",
-        slot_key="to",
-        default=DEFAULT_NIGHT_START,
-    ),
-)
-
 # Domestic hot water setpoints and comfort-window fields (wizard-backed).
 DHW_SETPOINTS: tuple[tuple[str, str], ...] = (
     ("day", "Day setpoint"),
     ("night", "Night setpoint"),
 )
 DHW_NAME = "Domestic hot water"
-
-
-def _normalized_schedule(room: XceedRoom) -> list[Any]:
-    """Return the room schedule padded/truncated to the fixed 21 slots."""
-    schedule = list(room.schedule or [])
-    if len(schedule) < SCHEDULE_LENGTH:
-        schedule.extend([None] * (SCHEDULE_LENGTH - len(schedule)))
-    return schedule[:SCHEDULE_LENGTH]
 
 
 async def async_setup_entry(
@@ -133,18 +81,6 @@ async def async_setup_entry(
             entities.append(
                 IntergasXceedSetpointNumber(coordinator, room.id, description)
             )
-        for weekday_index, (weekday_key, weekday_label) in enumerate(WEEKDAYS):
-            for field in SCHEDULE_FIELDS:
-                entities.append(
-                    IntergasXceedScheduleNumber(
-                        coordinator,
-                        room.id,
-                        weekday_index,
-                        weekday_key,
-                        weekday_label,
-                        field,
-                    )
-                )
 
     # The domestic hot water setpoints and schedule come from the XpertOnly
     # wizard rather than a room, so they are gated on a DHW circuit existing -
@@ -240,90 +176,6 @@ class IntergasXceedSetpointNumber(IntergasXceedEntity, NumberEntity):
             day2,
             night,
         )
-        await self.coordinator.async_request_refresh()
-
-
-class IntergasXceedScheduleNumber(IntergasXceedEntity, NumberEntity):
-    """The day-start or night-start hour of a weekday comfort window."""
-
-    _attr_native_min_value = 0
-    _attr_native_max_value = 23
-    _attr_native_step = 1
-    _attr_mode = NumberMode.SLIDER
-    _attr_icon = "mdi:clock-outline"
-
-    def __init__(
-        self,
-        coordinator: IntergasXceedDataUpdateCoordinator,
-        room_id: int,
-        weekday_index: int,
-        weekday_key: str,
-        weekday_label: str,
-        field: XceedScheduleField,
-    ) -> None:
-        """Initialise the schedule hour entity."""
-        super().__init__(coordinator)
-        self._room_id = room_id
-        self._weekday_index = weekday_index
-        self._field = field
-        self._attr_unique_id = (
-            f"{self._serial}_schedule_{room_id}_{weekday_key}_{field.key}"
-        )
-        room = self._room
-        room_name = room.name if room else f"Zone {room_id}"
-        self._attr_name = f"{room_name} {weekday_label} {field.label}"
-
-    @property
-    def _room(self) -> XceedRoom | None:
-        """Return the backing room from the latest data."""
-        for room in self.coordinator.data.rooms:
-            if room.id == self._room_id:
-                return room
-        return None
-
-    @property
-    def available(self) -> bool:
-        """Return True if the zone is present in the latest update."""
-        return super().available and self._room is not None
-
-    @property
-    def _slot(self) -> dict[str, Any] | None:
-        """Return the comfort window slot for this weekday, if any."""
-        room = self._room
-        if room is None:
-            return None
-        slot = _normalized_schedule(room)[self._weekday_index * SLOTS_PER_DAY]
-        return slot if isinstance(slot, dict) else None
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the configured hour for this weekday, if set."""
-        slot = self._slot
-        if slot is None:
-            return None
-        value = slot.get(self._field.slot_key)
-        return float(value) if value is not None else None
-
-    async def async_set_native_value(self, value: float) -> None:
-        """Write a new hour for this weekday's comfort window."""
-        room = self._room
-        if room is None:
-            return
-        schedule = _normalized_schedule(room)
-        index = self._weekday_index * SLOTS_PER_DAY
-        current = schedule[index]
-        if isinstance(current, dict):
-            slot = dict(current)
-        else:
-            slot = {
-                "from": DEFAULT_DAY_START,
-                "to": DEFAULT_NIGHT_START,
-                "type": "H",
-            }
-        slot[self._field.slot_key] = int(value)
-        slot.setdefault("type", "H")
-        schedule[index] = slot
-        await self.coordinator.api.async_set_room_schedule(self._room_id, schedule)
         await self.coordinator.async_request_refresh()
 
 
