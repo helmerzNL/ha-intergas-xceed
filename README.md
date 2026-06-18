@@ -58,7 +58,11 @@ Why:
 
 3. **Entities**
    - Climate: one entity per heating zone with a writable target temperature
-   - Water heater: the domestic hot water (DHW) circuit with a writable setpoint
+   - Water heater: the domestic hot water (DHW) circuit, split into a Day
+     (comfort) and a Night (reduced) entity. Each exposes its own writable
+     setpoint that mirrors the boiler menu exactly; the day entity also
+     carries the weekly comfort schedule as an attribute. Both report whether
+     the circuit is currently in its comfort or reduced window
    - Number: writable day/day2/night comfort setpoints per heating zone, plus
      per-weekday day-start/night-start hour sliders for the comfort schedule.
      For the DHW circuit it also exposes the day and night water setpoints that
