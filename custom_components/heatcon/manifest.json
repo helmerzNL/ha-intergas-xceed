@@ -1,0 +1,18 @@
+{
+  "domain": "heatcon",
+  "name": "HeatCon",
+  "codeowners": [
+    "@helmerzNL"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/helmerzNL/ha-heatcon",
+  "issue_tracker": "https://github.com/helmerzNL/ha-heatcon/issues",
+  "iot_class": "local_polling",
+  "loggers": [
+    "custom_components.heatcon"
+  ],
+  "requirements": [
+    "pycryptodomex>=3.23.0"
+  ],
+  "version": "0.8.0"
+}

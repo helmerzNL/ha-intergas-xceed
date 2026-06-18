@@ -1,4 +1,4 @@
-"""Async HTTP client for the Intergas XCeed / heatapp! local server."""
+"""Async HTTP client for the HeatCon / heatapp! local server."""
 
 from __future__ import annotations
 
@@ -63,15 +63,15 @@ _WIZARD_WEEKDAYS: tuple[str, ...] = (
 )
 
 
-class IntergasXceedApiError(Exception):
+class HeatconApiError(Exception):
     """Raised when the device API returns an unexpected result."""
 
 
-class IntergasXceedAuthenticationError(IntergasXceedApiError):
+class HeatconAuthenticationError(HeatconApiError):
     """Raised when authentication fails."""
 
 
-class IntergasXceedInvalidAuthError(IntergasXceedAuthenticationError):
+class HeatconInvalidAuthError(HeatconAuthenticationError):
     """Raised when the device explicitly rejects the supplied credentials."""
 
 
@@ -207,7 +207,7 @@ def _clock_value(value: time) -> str:
     return f"{value.hour:02d}.{minute:02d}"
 
 
-class IntergasXceedApiClient:
+class HeatconApiClient:
     """Thin async client around the reverse-engineered local heatapp! API."""
 
     def __init__(
@@ -246,9 +246,9 @@ class IntergasXceedApiClient:
         try:
             await self._async_authenticate()
             return await self._async_signed_request(ENDPOINT_VERSION)
-        except IntergasXceedApiError:
+        except HeatconApiError:
             _LOGGER.exception(
-                "Intergas XCeed test connection failed for host %s", self._host
+                "HeatCon test connection failed for host %s", self._host
             )
             raise
 
@@ -265,7 +265,7 @@ class IntergasXceedApiClient:
         )
 
         if rooms is None:
-            raise IntergasXceedApiError("Device did not return a room list")
+            raise HeatconApiError("Device did not return a room list")
 
         room_ids: list[int] = []
         for group in rooms.get("groups") or []:
@@ -322,7 +322,7 @@ class IntergasXceedApiClient:
             },
         )
         if result.get("success") is False:
-            raise IntergasXceedApiError(
+            raise HeatconApiError(
                 "Setting the temperature failed: "
                 f"{result.get('message') or 'unknown error'}"
             )
@@ -336,7 +336,7 @@ class IntergasXceedApiClient:
             {"scene": scene, "active": 1 if active else 0, "duration": int(duration)},
         )
         if result.get("success") is False:
-            raise IntergasXceedApiError(
+            raise HeatconApiError(
                 f"Setting scene {scene} failed: {result.get('message') or 'unknown error'}"
             )
 
@@ -366,7 +366,7 @@ class IntergasXceedApiClient:
             payload["desiredTempDay2"] = _normalize_number(day2)
         result = await self._async_signed_request(ENDPOINT_ROOM_UPDATE, payload)
         if result.get("success") is False:
-            raise IntergasXceedApiError(
+            raise HeatconApiError(
                 "Updating the setpoints failed: "
                 f"{result.get('message') or 'unknown error'}"
             )
@@ -389,7 +389,7 @@ class IntergasXceedApiClient:
             },
         )
         if result.get("success") is False:
-            raise IntergasXceedApiError(
+            raise HeatconApiError(
                 "Updating the schedule failed: "
                 f"{result.get('message') or 'unknown error'}"
             )
@@ -402,7 +402,7 @@ class IntergasXceedApiClient:
         saves it. The cache is flagged dirty so the next poll reflects it.
         """
         if kind not in ("day", "night"):
-            raise IntergasXceedApiError(f"Unknown DHW setpoint kind {kind!r}")
+            raise HeatconApiError(f"Unknown DHW setpoint kind {kind!r}")
         prefix = (
             DHW_DAY_SETPOINT_PREFIX if kind == "day" else DHW_NIGHT_SETPOINT_PREFIX
         )
@@ -421,7 +421,7 @@ class IntergasXceedApiClient:
                 None,
             )
             if not heating_menu:
-                raise IntergasXceedApiError("DHW heating-mode menu not found")
+                raise HeatconApiError("DHW heating-mode menu not found")
             heating = _wizard_entries(
                 await self._wizard_next(heating_menu["Servercode"])
             )
@@ -434,7 +434,7 @@ class IntergasXceedApiClient:
                 None,
             )
             if not leaf:
-                raise IntergasXceedApiError(f"DHW {kind} setpoint not found")
+                raise HeatconApiError(f"DHW {kind} setpoint not found")
             detail = (
                 await self._wizard_next(leaf["Servercode"])
             ).get("heatcom") or {}
@@ -444,7 +444,7 @@ class IntergasXceedApiClient:
             ) or []
             key = _snap_setpoint_key(werteliste, float(celsius))
             if not save_servercode or key is None:
-                raise IntergasXceedApiError(
+                raise HeatconApiError(
                     "DHW setpoint edit detail was incomplete"
                 )
             optiontext = f"Domestic hot water  <- Heating mode <- {label} setpoint"
@@ -452,7 +452,7 @@ class IntergasXceedApiClient:
                 save_servercode, key, WIZARD_SAVE_TYPE_PARAMETER, optiontext
             )
             if result.get("success") is False:
-                raise IntergasXceedApiError(
+                raise HeatconApiError(
                     "Updating the DHW setpoint failed: "
                     f"{result.get('message') or 'unknown error'}"
                 )
@@ -468,7 +468,7 @@ class IntergasXceedApiClient:
         controller supports (e.g. ``13:30`` -> ``"13.30"``).
         """
         if not 0 <= int(weekday_index) <= 6:
-            raise IntergasXceedApiError(f"Invalid weekday index {weekday_index}")
+            raise HeatconApiError(f"Invalid weekday index {weekday_index}")
         weekday_index = int(weekday_index)
         async with self._wizard_lock:
             await self._async_enter_wizard()
@@ -484,7 +484,7 @@ class IntergasXceedApiClient:
                 None,
             )
             if not switching_menu:
-                raise IntergasXceedApiError("DHW switching-times menu not found")
+                raise HeatconApiError("DHW switching-times menu not found")
             switching = _wizard_entries(
                 await self._wizard_next(switching_menu["Servercode"])
             )
@@ -497,7 +497,7 @@ class IntergasXceedApiClient:
             ]
             index = weekday_index * 2
             if index >= len(slots):
-                raise IntergasXceedApiError(
+                raise HeatconApiError(
                     f"DHW switching slot for weekday {weekday_index} not found"
                 )
             detail = (
@@ -505,7 +505,7 @@ class IntergasXceedApiClient:
             ).get("heatcom") or {}
             save_servercode = detail.get("Servercode")
             if not save_servercode:
-                raise IntergasXceedApiError(
+                raise HeatconApiError(
                     "DHW switching-time edit detail was incomplete"
                 )
             value = _format_switchtime(from_time, to_time)
@@ -517,7 +517,7 @@ class IntergasXceedApiClient:
                 save_servercode, value, WIZARD_SAVE_TYPE_SWITCHINGTIME, optiontext
             )
             if result.get("success") is False:
-                raise IntergasXceedApiError(
+                raise HeatconApiError(
                     "Updating the DHW schedule failed: "
                     f"{result.get('message') or 'unknown error'}"
                 )
@@ -529,8 +529,8 @@ class IntergasXceedApiClient:
         """Run a signed request, returning None on a per-endpoint failure."""
         try:
             return await self._async_signed_request(path, payload)
-        except IntergasXceedApiError as err:
-            _LOGGER.debug("Intergas XCeed request to %s failed: %s", path, err)
+        except HeatconApiError as err:
+            _LOGGER.debug("HeatCon request to %s failed: %s", path, err)
             return None
 
     # ------------------------------------------------------------------
@@ -555,9 +555,9 @@ class IntergasXceedApiClient:
             try:
                 await self._async_enter_wizard()
                 payload = await self._async_read_dhw_wizard()
-            except IntergasXceedApiError as err:
+            except HeatconApiError as err:
                 _LOGGER.debug(
-                    "Intergas XCeed DHW wizard read failed, keeping cache: %s", err
+                    "HeatCon DHW wizard read failed, keeping cache: %s", err
                 )
                 return self._dhw_cache
             self._dhw_cache = payload
@@ -648,9 +648,9 @@ class IntergasXceedApiClient:
                     ).get("heatcom") or {}
                     bounds["night"] = _parse_setpoint_bounds(detail)
                 self._dhw_bounds = bounds
-            except IntergasXceedApiError as err:
+            except HeatconApiError as err:
                 _LOGGER.debug(
-                    "Intergas XCeed DHW bounds read failed (will retry): %s", err
+                    "HeatCon DHW bounds read failed (will retry): %s", err
                 )
 
         payload: dict[str, Any] = {
@@ -688,7 +688,7 @@ class IntergasXceedApiClient:
     async def _wizard_start(self) -> dict[str, Any]:
         """Open the wizard root menu, pinning the per-session request counter."""
         if self._auth is None:
-            raise IntergasXceedAuthenticationError("Cannot run wizard without a session")
+            raise HeatconAuthenticationError("Cannot run wizard without a session")
         self._counter += 1
         self._wizard_reqcount = self._counter
         self._wizard_ereqcount = 0
@@ -705,7 +705,7 @@ class IntergasXceedApiClient:
     async def _wizard_next(self, servercode: str) -> dict[str, Any]:
         """Navigate one step deeper into the wizard tree."""
         if self._auth is None:
-            raise IntergasXceedAuthenticationError("Cannot run wizard without a session")
+            raise HeatconAuthenticationError("Cannot run wizard without a session")
         self._wizard_ereqcount += 1
         params = {
             "servercode": servercode,
@@ -722,7 +722,7 @@ class IntergasXceedApiClient:
     ) -> dict[str, Any]:
         """Persist a single value through the wizard save endpoint."""
         if self._auth is None:
-            raise IntergasXceedAuthenticationError("Cannot run wizard without a session")
+            raise HeatconAuthenticationError("Cannot run wizard without a session")
         self._wizard_ereqcount += 1
         params = {
             "servercode": servercode,
@@ -750,7 +750,7 @@ class IntergasXceedApiClient:
         response = await self._request_form(path, params)
         if response.get("loginRejected"):
             self._auth = None
-            raise IntergasXceedApiError(f"Wizard call to {path} was login-rejected")
+            raise HeatconApiError(f"Wizard call to {path} was login-rejected")
         return response
 
     async def _request_get(self, path: str) -> None:
@@ -765,7 +765,7 @@ class IntergasXceedApiClient:
                 await response.text()
         except (ClientError, asyncio.TimeoutError) as err:
             _LOGGER.debug(
-                "Intergas XCeed GET to %s failed: %s", path, err
+                "HeatCon GET to %s failed: %s", path, err
             )
 
     async def _async_authenticate(self) -> None:
@@ -780,11 +780,11 @@ class IntergasXceedApiClient:
             nonce = challenge.get("devicetoken")
             if not nonce:
                 _LOGGER.error(
-                    "Intergas XCeed host %s returned no challenge nonce: %s",
+                    "HeatCon host %s returned no challenge nonce: %s",
                     self._host,
                     challenge,
                 )
-                raise IntergasXceedApiError("Challenge nonce missing from response")
+                raise HeatconApiError("Challenge nonce missing from response")
 
             hashed = md5(
                 f"{self._password}{nonce}".encode("utf-8"), usedforsecurity=False
@@ -802,11 +802,11 @@ class IntergasXceedApiClient:
 
             if login.get("loginRejected") or not login.get("success", True):
                 _LOGGER.error(
-                    "Intergas XCeed host %s rejected login for user %s",
+                    "HeatCon host %s rejected login for user %s",
                     self._host,
                     self._username,
                 )
-                raise IntergasXceedInvalidAuthError(
+                raise HeatconInvalidAuthError(
                     "The device rejected the supplied credentials"
                 )
 
@@ -814,17 +814,17 @@ class IntergasXceedApiClient:
             user_id = login.get("userid")
             if not encrypted or user_id is None:
                 _LOGGER.error(
-                    "Intergas XCeed host %s returned an incomplete login response",
+                    "HeatCon host %s returned an incomplete login response",
                     self._host,
                 )
-                raise IntergasXceedApiError("Login response is missing token information")
+                raise HeatconApiError("Login response is missing token information")
 
             self._auth = _Session(
                 user_id=str(user_id),
                 device_token=self._decrypt_device_token(str(encrypted)),
             )
             self._counter = 0
-            _LOGGER.debug("Authenticated against Intergas XCeed at %s", self._host)
+            _LOGGER.debug("Authenticated against HeatCon at %s", self._host)
 
     async def _async_signed_request(
         self, path: str, payload: dict[str, Any] | None = None
@@ -832,7 +832,7 @@ class IntergasXceedApiClient:
         """Issue a signed request, re-authenticating once on rejection."""
         await self._async_authenticate()
         if self._auth is None:
-            raise IntergasXceedAuthenticationError("Authentication state is missing")
+            raise HeatconAuthenticationError("Authentication state is missing")
 
         params: dict[str, Any] = {
             "udid": DEFAULT_UDID,
@@ -859,7 +859,7 @@ class IntergasXceedApiClient:
     def _create_signature(self, params: dict[str, Any]) -> str:
         """Create the md5 request signature the API expects."""
         if self._auth is None:
-            raise IntergasXceedAuthenticationError("Cannot sign without a session")
+            raise HeatconAuthenticationError("Cannot sign without a session")
         message = "".join(
             f"{key}={_normalize(params[key])}|"
             for key in sorted(params)
@@ -885,27 +885,27 @@ class IntergasXceedApiClient:
                 text = await response.text()
         except (ClientError, asyncio.TimeoutError) as err:
             _LOGGER.error(
-                "Intergas XCeed request failed for host %s path %s: %s",
+                "HeatCon request failed for host %s path %s: %s",
                 self._host,
                 path,
                 err,
             )
-            raise IntergasXceedApiError(f"Request to {path} failed: {err}") from err
+            raise HeatconApiError(f"Request to {path} failed: {err}") from err
 
         if response.status >= 400:
-            raise IntergasXceedApiError(
+            raise HeatconApiError(
                 f"Request to {path} failed with HTTP {response.status}"
             )
 
         try:
             data = json.loads(text)
         except json.JSONDecodeError as err:
-            raise IntergasXceedApiError(
+            raise HeatconApiError(
                 f"Request to {path} did not return valid JSON"
             ) from err
 
         if not isinstance(data, dict):
-            raise IntergasXceedApiError(f"Request to {path} returned a non-object payload")
+            raise HeatconApiError(f"Request to {path} returned a non-object payload")
         return data
 
     def _decrypt_device_token(self, encrypted_token: str) -> str:
@@ -916,7 +916,7 @@ class IntergasXceedApiClient:
         decrypted = AES.new(key, AES.MODE_CBC, iv).decrypt(encrypted_bytes)
         padding_length = decrypted[-1]
         if padding_length < 1 or padding_length > AES.block_size:
-            raise IntergasXceedAuthenticationError(
+            raise HeatconAuthenticationError(
                 "Received an invalid encrypted device token"
             )
         return decrypted[:-padding_length].decode("utf-8")

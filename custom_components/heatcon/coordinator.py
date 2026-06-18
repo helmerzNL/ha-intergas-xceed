@@ -1,4 +1,4 @@
-"""Data update coordinator for Intergas XCeed."""
+"""Data update coordinator for HeatCon."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import (
-    IntergasXceedApiClient,
-    IntergasXceedAuthenticationError,
-    IntergasXceedApiError,
+    HeatconApiClient,
+    HeatconAuthenticationError,
+    HeatconApiError,
 )
 from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN, MIN_UPDATE_INTERVAL
 
@@ -22,7 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
-class XceedRoom:
+class HeatconRoom:
     """A heating zone or domestic hot water circuit."""
 
     id: int
@@ -46,7 +46,7 @@ class XceedRoom:
 
 
 @dataclass
-class XceedScene:
+class HeatconScene:
     """A heatapp! scene (operating mode)."""
 
     name: str
@@ -57,7 +57,7 @@ class XceedScene:
 
 
 @dataclass
-class XceedDhwSlot:
+class HeatconDhwSlot:
     """A single domestic hot water comfort window for one weekday."""
 
     weekday: int
@@ -66,7 +66,7 @@ class XceedDhwSlot:
 
 
 @dataclass
-class XceedDhw:
+class HeatconDhw:
     """Domestic hot water setpoints + schedule read via the XpertOnly wizard."""
 
     available: bool = False
@@ -78,30 +78,30 @@ class XceedDhw:
     night_min: float | None = None
     night_max: float | None = None
     night_step: float | None = None
-    schedule: list[XceedDhwSlot] = field(default_factory=list)
+    schedule: list[HeatconDhwSlot] = field(default_factory=list)
 
 
 @dataclass
-class XceedData:
+class HeatconData:
     """Parsed read model for the integration."""
 
-    rooms: list[XceedRoom] = field(default_factory=list)
-    scenes: list[XceedScene] = field(default_factory=list)
+    rooms: list[HeatconRoom] = field(default_factory=list)
+    scenes: list[HeatconScene] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     weather: dict[str, Any] = field(default_factory=dict)
     version: dict[str, Any] = field(default_factory=dict)
-    dhw: XceedDhw | None = None
+    dhw: HeatconDhw | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
-class IntergasXceedDataUpdateCoordinator(DataUpdateCoordinator[XceedData]):
-    """Coordinate polling against the Intergas XCeed device."""
+class HeatconDataUpdateCoordinator(DataUpdateCoordinator[HeatconData]):
+    """Coordinate polling against the HeatCon device."""
 
     def __init__(
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        api: IntergasXceedApiClient,
+        api: HeatconApiClient,
     ) -> None:
         scan_interval = max(
             entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
@@ -116,21 +116,21 @@ class IntergasXceedDataUpdateCoordinator(DataUpdateCoordinator[XceedData]):
         self.config_entry = entry
         self.api = api
 
-    async def _async_update_data(self) -> XceedData:
+    async def _async_update_data(self) -> HeatconData:
         """Fetch and parse the latest data from the device."""
         try:
             payload = await self.api.async_get_data()
-        except IntergasXceedAuthenticationError as err:
+        except HeatconAuthenticationError as err:
             raise UpdateFailed(f"Authentication failed: {err}") from err
-        except IntergasXceedApiError as err:
+        except HeatconApiError as err:
             raise UpdateFailed(f"API error: {err}") from err
         return _parse(payload)
 
 
-def _parse(payload: dict[str, Any]) -> XceedData:
+def _parse(payload: dict[str, Any]) -> HeatconData:
     """Convert the raw aggregated payload into a typed model."""
     schedules: dict[int, Any] = payload.get("schedules") or {}
-    rooms: list[XceedRoom] = []
+    rooms: list[HeatconRoom] = []
 
     for group in (payload.get("rooms") or {}).get("groups") or []:
         group_id = group.get("groupid")
@@ -144,7 +144,7 @@ def _parse(payload: dict[str, Any]) -> XceedData:
                 isinstance(appid, str) and appid.startswith("0201")
             )
             rooms.append(
-                XceedRoom(
+                HeatconRoom(
                     id=rid,
                     name=raw.get("name") or f"Room {rid}",
                     appid=appid,
@@ -166,13 +166,13 @@ def _parse(payload: dict[str, Any]) -> XceedData:
                 )
             )
 
-    scenes: list[XceedScene] = []
+    scenes: list[HeatconScene] = []
     for raw in (payload.get("scenes") or {}).get("scenes") or []:
         name = raw.get("name")
         if not name:
             continue
         scenes.append(
-            XceedScene(
+            HeatconScene(
                 name=name,
                 active=bool(raw.get("isActive")),
                 min=raw.get("min"),
@@ -181,7 +181,7 @@ def _parse(payload: dict[str, Any]) -> XceedData:
             )
         )
 
-    return XceedData(
+    return HeatconData(
         rooms=rooms,
         scenes=scenes,
         errors=(payload.get("systemstate") or {}).get("errors") or [],
@@ -192,22 +192,22 @@ def _parse(payload: dict[str, Any]) -> XceedData:
     )
 
 
-def _parse_dhw(payload: dict[str, Any] | None) -> XceedDhw | None:
+def _parse_dhw(payload: dict[str, Any] | None) -> HeatconDhw | None:
     """Convert the raw wizard DHW payload into a typed model."""
     if not payload:
         return None
     day_bounds = payload.get("day_bounds") or {}
     night_bounds = payload.get("night_bounds") or {}
-    schedule: list[XceedDhwSlot] = []
+    schedule: list[HeatconDhwSlot] = []
     for slot in payload.get("schedule") or []:
         schedule.append(
-            XceedDhwSlot(
+            HeatconDhwSlot(
                 weekday=int(slot.get("weekday", 0)),
                 start=_hhmm_to_time(slot.get("from")),
                 end=_hhmm_to_time(slot.get("to")),
             )
         )
-    return XceedDhw(
+    return HeatconDhw(
         available=bool(payload.get("available")),
         day_setpoint=_as_float(payload.get("day_setpoint")),
         night_setpoint=_as_float(payload.get("night_setpoint")),

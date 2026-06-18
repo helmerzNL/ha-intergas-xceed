@@ -1,4 +1,4 @@
-"""Config flow for Intergas XCeed."""
+"""Config flow for HeatCon."""
 
 from __future__ import annotations
 
@@ -14,25 +14,25 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
-    IntergasXceedApiClient,
-    IntergasXceedApiError,
-    IntergasXceedInvalidAuthError,
+    HeatconApiClient,
+    HeatconApiError,
+    HeatconInvalidAuthError,
 )
 from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class IntergasXceedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Intergas XCeed."""
+class HeatconConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for HeatCon."""
 
     VERSION = 1
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "IntergasXceedOptionsFlow":
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "HeatconOptionsFlow":
         """Get the options flow for this handler."""
-        return IntergasXceedOptionsFlow(config_entry)
+        return HeatconOptionsFlow(config_entry)
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle the initial step."""
@@ -42,7 +42,7 @@ class IntergasXceedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(user_input[CONF_HOST])
             self._abort_if_unique_id_configured()
 
-            api = IntergasXceedApiClient(
+            api = HeatconApiClient(
                 host=user_input[CONF_HOST],
                 username=user_input[CONF_USERNAME],
                 password=user_input[CONF_PASSWORD],
@@ -51,16 +51,16 @@ class IntergasXceedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 await api.async_test_connection()
-            except IntergasXceedInvalidAuthError as err:
+            except HeatconInvalidAuthError as err:
                 _LOGGER.warning(
-                    "Intergas XCeed authentication failed for host %s: %s",
+                    "HeatCon authentication failed for host %s: %s",
                     user_input[CONF_HOST],
                     err,
                 )
                 errors["base"] = "invalid_auth"
-            except IntergasXceedApiError as err:
+            except HeatconApiError as err:
                 _LOGGER.exception(
-                    "Unable to connect to Intergas XCeed at host %s: %s",
+                    "Unable to connect to HeatCon at host %s: %s",
                     user_input[CONF_HOST],
                     err,
                 )
@@ -75,7 +75,7 @@ class IntergasXceedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_PASSWORD: user_input[CONF_PASSWORD],
                 }
                 return self.async_create_entry(
-                    title=f"Intergas XCeed ({user_input[CONF_HOST]})",
+                    title=f"HeatCon ({user_input[CONF_HOST]})",
                     data=data,
                     options=options,
                 )
@@ -97,8 +97,8 @@ class IntergasXceedConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class IntergasXceedOptionsFlow(config_entries.OptionsFlow):
-    """Handle options for the Intergas XCeed integration."""
+class HeatconOptionsFlow(config_entries.OptionsFlow):
+    """Handle options for the HeatCon integration."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize the options flow."""

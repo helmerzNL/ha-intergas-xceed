@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Verbinden met Intergas XCeed",
-        "description": "Configureer de lokale verbinding met de XCeed-controller.",
+        "title": "Verbinden met HeatCon",
+        "description": "Configureer de lokale verbinding met de HeatCon-controller.",
         "data": {
           "host": "Hostnaam of IP-adres",
           "username": "Gebruikersnaam",
@@ -13,7 +13,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Verbinden met de Intergas XCeed-controller is mislukt.",
+      "cannot_connect": "Verbinden met de HeatCon-controller is mislukt.",
       "invalid_auth": "Aanmelden is mislukt.",
       "unknown": "Onverwachte fout."
     },
@@ -24,7 +24,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Intergas XCeed opties",
+        "title": "HeatCon opties",
         "data": {
           "scan_interval": "Update-interval (seconden)"
         }

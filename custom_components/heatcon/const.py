@@ -1,4 +1,4 @@
-"""Constants for the Intergas XCeed integration."""
+"""Constants for the HeatCon integration."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Final
 
 from homeassistant.const import Platform
 
-DOMAIN: Final = "intergas_xceed"
+DOMAIN: Final = "heatcon"
 MANUFACTURER: Final = "Intergas"
 DEFAULT_PORT: Final = 80
 DEFAULT_SCAN_INTERVAL: Final = 30

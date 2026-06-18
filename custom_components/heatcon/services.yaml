@@ -1,7 +1,7 @@
 set_schedule:
   target:
     entity:
-      integration: intergas_xceed
+      integration: heatcon
       domain: climate
   fields:
     switchingtimes:

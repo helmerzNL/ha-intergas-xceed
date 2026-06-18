@@ -1,4 +1,4 @@
-"""Climate platform for Intergas XCeed heating zones."""
+"""Climate platform for HeatCon heating zones."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import voluptuous as vol
 
 from .const import DOMAIN, SERVICE_SET_SCHEDULE
-from .coordinator import IntergasXceedDataUpdateCoordinator, XceedRoom
-from .entity import IntergasXceedEntity
+from .coordinator import HeatconDataUpdateCoordinator, HeatconRoom
+from .entity import HeatconEntity
 
 DEFAULT_MIN_TEMP = 5.0
 DEFAULT_MAX_TEMP = 35.0
@@ -40,7 +40,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the climate entities."""
-    coordinator: IntergasXceedDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HeatconDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     platform = entity_platform.async_get_current_platform()
     platform.async_register_entity_service(
@@ -54,13 +54,13 @@ async def async_setup_entry(
     )
 
     async_add_entities(
-        IntergasXceedClimate(coordinator, room.id)
+        HeatconClimate(coordinator, room.id)
         for room in coordinator.data.rooms
         if not room.is_dhw
     )
 
 
-class IntergasXceedClimate(IntergasXceedEntity, ClimateEntity):
+class HeatconClimate(HeatconEntity, ClimateEntity):
     """A heating zone exposed as a climate entity."""
 
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -70,7 +70,7 @@ class IntergasXceedClimate(IntergasXceedEntity, ClimateEntity):
     _attr_hvac_mode = HVACMode.HEAT
 
     def __init__(
-        self, coordinator: IntergasXceedDataUpdateCoordinator, room_id: int
+        self, coordinator: HeatconDataUpdateCoordinator, room_id: int
     ) -> None:
         """Initialise the climate entity."""
         super().__init__(coordinator)
@@ -80,7 +80,7 @@ class IntergasXceedClimate(IntergasXceedEntity, ClimateEntity):
         self._attr_name = room.name if room else f"Zone {room_id}"
 
     @property
-    def _room(self) -> XceedRoom | None:
+    def _room(self) -> HeatconRoom | None:
         """Return the backing room from the latest data."""
         for room in self.coordinator.data.rooms:
             if room.id == self._room_id:

@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to Intergas XCeed",
-        "description": "Configure the local XCeed controller connection.",
+        "title": "Connect to HeatCon",
+        "description": "Configure the local HeatCon controller connection.",
         "data": {
           "host": "Host or IP address",
           "username": "Username",
@@ -13,7 +13,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the Intergas XCeed controller.",
+      "cannot_connect": "Failed to connect to the HeatCon controller.",
       "invalid_auth": "Authentication failed.",
       "unknown": "Unexpected error."
     },
@@ -24,7 +24,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Intergas XCeed options",
+        "title": "HeatCon options",
         "data": {
           "scan_interval": "Update interval (seconds)"
         }

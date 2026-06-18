@@ -1,29 +1,32 @@
-# ha-intergas-xceed
+# HeatCon
 
 <p align="center">
-  <img src="./icon.png" alt="Intergas XCeed logo" width="180">
+  <img src="./icon.png" alt="HeatCon logo" width="180">
 </p>
 
-[![Open your Home Assistant instance and add this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=helmerzNL&repository=ha-intergas-xceed&category=integration)
+[![Open your Home Assistant instance and add this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=helmerzNL&repository=ha-heatcon&category=integration)
 
 ## Installation
 
 1. Make sure HACS is installed in Home Assistant.
 2. Use the **Add to HACS** button above, or add this repository as a custom integration repository in HACS manually.
-3. Install **Intergas XCeed** from HACS.
+3. Install **HeatCon** from HACS.
 4. Restart Home Assistant.
 5. Add the integration from **Settings -> Devices & Services**.
 
-## Background: heatcon! controller and heatapp! software
+## Background: HeatCon! controller and heatapp! software
 
-The Intergas XCeed is built around an **EBV heatcon!** system controller
-(EBV GmbH). heatcon! is an OEM control platform for heat pumps and other heat
-sources, which Intergas ships under its own branding inside the XCeed.
+This integration is named **HeatCon** after the **EBV HeatCon!** system
+controller (EBV GmbH) it talks to. HeatCon! is an OEM control platform for
+heat pumps and other heat sources that several manufacturers ship under their
+own branding. The **Intergas XCeed** is one such boiler: it is built around a
+HeatCon! controller, so this integration works with it directly, as well as
+with other HeatCon!-based systems that expose the same local API.
 
 The controller is operated through the **heatapp!** app and web interface,
 which talk to a local gateway/server on your network. Whenever you change a
-setting in the Intergas app or web UI, you are really talking to that
-heatapp! / heatcon! server.
+setting in the manufacturer app or web UI, you are really talking to that
+heatapp! / HeatCon! server.
 
 This integration communicates with the same local API. That is why it can
 expose far more than the handful of temperatures available over MQTT, including
@@ -73,7 +76,7 @@ Why:
    - Sensors: per-room actual/desired/day/night temperatures, outdoor temperature, system status, active modes
    - Binary sensors: cooling, window, comfort mode, and a system problem indicator
    - Switches: one per heatapp! scene (Party, Boost, Holiday, Shower, Leave, Standby, Towel)
-   - Service: `intergas_xceed.set_schedule` to write a zone's weekly switching times
+   - Service: `heatcon.set_schedule` to write a zone's weekly switching times
 
 4. **Diagnostics**
    - API version and device information
@@ -110,7 +113,7 @@ Why:
 
 ## Repository status
 
-This repository contains a **HACS-publishable custom integration** in `custom_components/intergas_xceed`.
+This repository contains a **HACS-publishable custom integration** in `custom_components/heatcon`.
 
 Included:
 - HACS metadata (`hacs.json`)
@@ -128,7 +131,7 @@ Included:
 HACS reads update information from the **GitHub release body**. To make those
 notes useful in Home Assistant:
 
-1. Update the integration version in `custom_components/intergas_xceed/manifest.json`
+1. Update the integration version in `custom_components/heatcon/manifest.json`
    (the value without the leading `v`).
 2. Create a GitHub release whose tag matches that version (for example `v0.4.1`)
    and target the default branch (`main`).
@@ -143,7 +146,7 @@ notes useful in Home Assistant:
 The release body is shown when you **update** an already-installed integration,
 not on the first download:
 
-- **Settings → System → Updates** → open the Intergas XCeed update to read the
+- **Settings → System → Updates** → open the HeatCon update to read the
   release notes in the dialog.
 - **Developer Tools → States** → the `update.*` entity exposes the same text in
   its `release_summary` attribute.

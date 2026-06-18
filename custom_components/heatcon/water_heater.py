@@ -1,4 +1,4 @@
-"""Water heater platform for the Intergas XCeed domestic hot water circuit."""
+"""Water heater platform for the HeatCon domestic hot water circuit."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .coordinator import IntergasXceedDataUpdateCoordinator, XceedDhw, XceedRoom
-from .entity import IntergasXceedEntity
+from .coordinator import HeatconDataUpdateCoordinator, HeatconDhw, HeatconRoom
+from .entity import HeatconEntity
 
 DEFAULT_DHW_MIN_TEMP = 40.0
 DEFAULT_DHW_MAX_TEMP = 65.0
@@ -66,16 +66,16 @@ async def async_setup_entry(
     one for the day (comfort) setpoint and one for the night (reduced)
     setpoint, so both values can be read and adjusted independently.
     """
-    coordinator: IntergasXceedDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HeatconDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        IntergasXceedWaterHeater(coordinator, room.id, kind, label, with_schedule)
+        HeatconWaterHeater(coordinator, room.id, kind, label, with_schedule)
         for room in coordinator.data.rooms
         if room.is_dhw
         for kind, label, with_schedule in DHW_KINDS
     )
 
 
-class IntergasXceedWaterHeater(IntergasXceedEntity, WaterHeaterEntity):
+class HeatconWaterHeater(HeatconEntity, WaterHeaterEntity):
     """One domestic hot water setpoint (day or night) as a water heater."""
 
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -83,7 +83,7 @@ class IntergasXceedWaterHeater(IntergasXceedEntity, WaterHeaterEntity):
 
     def __init__(
         self,
-        coordinator: IntergasXceedDataUpdateCoordinator,
+        coordinator: HeatconDataUpdateCoordinator,
         room_id: int,
         kind: str,
         label: str,
@@ -100,7 +100,7 @@ class IntergasXceedWaterHeater(IntergasXceedEntity, WaterHeaterEntity):
         self._attr_name = f"{base} {label}"
 
     @property
-    def _room(self) -> XceedRoom | None:
+    def _room(self) -> HeatconRoom | None:
         """Return the backing room from the latest data."""
         for room in self.coordinator.data.rooms:
             if room.id == self._room_id:
@@ -108,7 +108,7 @@ class IntergasXceedWaterHeater(IntergasXceedEntity, WaterHeaterEntity):
         return None
 
     @property
-    def _dhw(self) -> XceedDhw | None:
+    def _dhw(self) -> HeatconDhw | None:
         """Return the DHW wizard model from the latest update."""
         return self.coordinator.data.dhw
 
