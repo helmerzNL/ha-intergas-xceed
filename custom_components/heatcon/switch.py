@@ -1,4 +1,4 @@
-"""Switch platform exposing Intergas XCeed scenes (operating modes)."""
+"""Switch platform exposing HeatCon scenes (operating modes)."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, SCENE_DEFAULT_DURATIONS
-from .coordinator import IntergasXceedDataUpdateCoordinator, XceedScene
-from .entity import IntergasXceedEntity
+from .coordinator import HeatconDataUpdateCoordinator, HeatconScene
+from .entity import HeatconEntity
 
 
 async def async_setup_entry(
@@ -20,18 +20,18 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the scene switch entities."""
-    coordinator: IntergasXceedDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HeatconDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        IntergasXceedSceneSwitch(coordinator, scene.name)
+        HeatconSceneSwitch(coordinator, scene.name)
         for scene in coordinator.data.scenes
     )
 
 
-class IntergasXceedSceneSwitch(IntergasXceedEntity, SwitchEntity):
+class HeatconSceneSwitch(HeatconEntity, SwitchEntity):
     """A switch that activates or deactivates a heatapp! scene."""
 
     def __init__(
-        self, coordinator: IntergasXceedDataUpdateCoordinator, scene_name: str
+        self, coordinator: HeatconDataUpdateCoordinator, scene_name: str
     ) -> None:
         """Initialise the scene switch."""
         super().__init__(coordinator)
@@ -40,7 +40,7 @@ class IntergasXceedSceneSwitch(IntergasXceedEntity, SwitchEntity):
         self._attr_name = f"{scene_name} mode"
 
     @property
-    def _scene(self) -> XceedScene | None:
+    def _scene(self) -> HeatconScene | None:
         for scene in self.coordinator.data.scenes:
             if scene.name == self._scene_name:
                 return scene

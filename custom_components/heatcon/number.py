@@ -1,4 +1,4 @@
-"""Number platform for Intergas XCeed comfort setpoints."""
+"""Number platform for HeatCon comfort setpoints."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import IntergasXceedDataUpdateCoordinator, XceedDhw, XceedRoom
-from .entity import IntergasXceedEntity
+from .coordinator import HeatconDataUpdateCoordinator, HeatconDhw, HeatconRoom
+from .entity import HeatconEntity
 
 DEFAULT_MIN_TEMP = 5.0
 DEFAULT_MAX_TEMP = 35.0
@@ -29,26 +29,26 @@ DEFAULT_DHW_STEP = 0.5
 
 
 @dataclass(frozen=True, kw_only=True)
-class XceedSetpointDescription:
+class HeatconSetpointDescription:
     """Describes a writable comfort setpoint of a room."""
 
     key: str
     label: str
-    value_fn: Callable[[XceedRoom], float | None]
+    value_fn: Callable[[HeatconRoom], float | None]
 
 
-SETPOINTS: tuple[XceedSetpointDescription, ...] = (
-    XceedSetpointDescription(
+SETPOINTS: tuple[HeatconSetpointDescription, ...] = (
+    HeatconSetpointDescription(
         key="day",
         label="Day setpoint",
         value_fn=lambda room: room.day_temperature,
     ),
-    XceedSetpointDescription(
+    HeatconSetpointDescription(
         key="day2",
         label="Day 2 setpoint",
         value_fn=lambda room: room.day2_temperature,
     ),
-    XceedSetpointDescription(
+    HeatconSetpointDescription(
         key="night",
         label="Night setpoint",
         value_fn=lambda room: room.night_temperature,
@@ -70,7 +70,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the setpoint number entities."""
-    coordinator: IntergasXceedDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HeatconDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[NumberEntity] = []
     for room in coordinator.data.rooms:
         if room.is_dhw:
@@ -79,7 +79,7 @@ async def async_setup_entry(
             if description.value_fn(room) is None:
                 continue
             entities.append(
-                IntergasXceedSetpointNumber(coordinator, room.id, description)
+                HeatconSetpointNumber(coordinator, room.id, description)
             )
 
     # The domestic hot water setpoints and schedule come from the XpertOnly
@@ -88,12 +88,12 @@ async def async_setup_entry(
     # unavailable until the first wizard read succeeds.
     if any(room.is_dhw for room in coordinator.data.rooms):
         for kind, label in DHW_SETPOINTS:
-            entities.append(IntergasXceedDhwSetpointNumber(coordinator, kind, label))
+            entities.append(HeatconDhwSetpointNumber(coordinator, kind, label))
 
     async_add_entities(entities)
 
 
-class IntergasXceedSetpointNumber(IntergasXceedEntity, NumberEntity):
+class HeatconSetpointNumber(HeatconEntity, NumberEntity):
     """A writable day/day2/night comfort setpoint for a heating zone."""
 
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
@@ -103,9 +103,9 @@ class IntergasXceedSetpointNumber(IntergasXceedEntity, NumberEntity):
 
     def __init__(
         self,
-        coordinator: IntergasXceedDataUpdateCoordinator,
+        coordinator: HeatconDataUpdateCoordinator,
         room_id: int,
-        description: XceedSetpointDescription,
+        description: HeatconSetpointDescription,
     ) -> None:
         """Initialise the setpoint number entity."""
         super().__init__(coordinator)
@@ -117,7 +117,7 @@ class IntergasXceedSetpointNumber(IntergasXceedEntity, NumberEntity):
         self._attr_name = f"{room_name} {description.label}"
 
     @property
-    def _room(self) -> XceedRoom | None:
+    def _room(self) -> HeatconRoom | None:
         """Return the backing room from the latest data."""
         for room in self.coordinator.data.rooms:
             if room.id == self._room_id:
@@ -179,7 +179,7 @@ class IntergasXceedSetpointNumber(IntergasXceedEntity, NumberEntity):
         await self.coordinator.async_request_refresh()
 
 
-class IntergasXceedDhwSetpointNumber(IntergasXceedEntity, NumberEntity):
+class HeatconDhwSetpointNumber(HeatconEntity, NumberEntity):
     """The domestic hot water day or night setpoint (XpertOnly wizard)."""
 
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
@@ -188,7 +188,7 @@ class IntergasXceedDhwSetpointNumber(IntergasXceedEntity, NumberEntity):
 
     def __init__(
         self,
-        coordinator: IntergasXceedDataUpdateCoordinator,
+        coordinator: HeatconDataUpdateCoordinator,
         kind: str,
         label: str,
     ) -> None:
@@ -199,7 +199,7 @@ class IntergasXceedDhwSetpointNumber(IntergasXceedEntity, NumberEntity):
         self._attr_name = f"{DHW_NAME} {label}"
 
     @property
-    def _dhw(self) -> XceedDhw | None:
+    def _dhw(self) -> HeatconDhw | None:
         """Return the DHW model from the latest update."""
         return self.coordinator.data.dhw
 

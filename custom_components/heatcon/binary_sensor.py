@@ -1,4 +1,4 @@
-"""Binary sensor platform for Intergas XCeed."""
+"""Binary sensor platform for HeatCon."""
 
 from __future__ import annotations
 
@@ -15,31 +15,31 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import IntergasXceedDataUpdateCoordinator, XceedRoom
-from .entity import IntergasXceedEntity
+from .coordinator import HeatconDataUpdateCoordinator, HeatconRoom
+from .entity import HeatconEntity
 
 
 @dataclass(frozen=True, kw_only=True)
-class XceedRoomBinaryDescription(BinarySensorEntityDescription):
+class HeatconRoomBinaryDescription(BinarySensorEntityDescription):
     """Describes a per-room binary sensor."""
 
-    value_fn: Callable[[XceedRoom], bool]
+    value_fn: Callable[[HeatconRoom], bool]
 
 
-ROOM_BINARY_SENSORS: tuple[XceedRoomBinaryDescription, ...] = (
-    XceedRoomBinaryDescription(
+ROOM_BINARY_SENSORS: tuple[HeatconRoomBinaryDescription, ...] = (
+    HeatconRoomBinaryDescription(
         key="cooling",
         name="Cooling",
         device_class=BinarySensorDeviceClass.COLD,
         value_fn=lambda room: room.cooling,
     ),
-    XceedRoomBinaryDescription(
+    HeatconRoomBinaryDescription(
         key="window_open",
         name="Window",
         device_class=BinarySensorDeviceClass.WINDOW,
         value_fn=lambda room: room.window_open,
     ),
-    XceedRoomBinaryDescription(
+    HeatconRoomBinaryDescription(
         key="comfort_mode",
         name="Comfort mode",
         value_fn=lambda room: bool(room.comfort_mode),
@@ -53,15 +53,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the binary sensor entities."""
-    coordinator: IntergasXceedDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HeatconDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[BinarySensorEntity] = [IntergasXceedProblemSensor(coordinator)]
+    entities: list[BinarySensorEntity] = [HeatconProblemSensor(coordinator)]
     for room in coordinator.data.rooms:
         if room.is_dhw:
             continue
         for description in ROOM_BINARY_SENSORS:
             entities.append(
-                IntergasXceedRoomBinarySensor(
+                HeatconRoomBinarySensor(
                     coordinator, room.id, room.name, description
                 )
             )
@@ -69,13 +69,13 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class IntergasXceedProblemSensor(IntergasXceedEntity, BinarySensorEntity):
+class HeatconProblemSensor(HeatconEntity, BinarySensorEntity):
     """Indicates whether the system currently reports an error."""
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_name = "System error"
 
-    def __init__(self, coordinator: IntergasXceedDataUpdateCoordinator) -> None:
+    def __init__(self, coordinator: HeatconDataUpdateCoordinator) -> None:
         """Initialise the problem sensor."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{self._serial}_system_error"
@@ -89,17 +89,17 @@ class IntergasXceedProblemSensor(IntergasXceedEntity, BinarySensorEntity):
         return {"errors": self.coordinator.data.errors}
 
 
-class IntergasXceedRoomBinarySensor(IntergasXceedEntity, BinarySensorEntity):
+class HeatconRoomBinarySensor(HeatconEntity, BinarySensorEntity):
     """A per-room binary sensor."""
 
-    entity_description: XceedRoomBinaryDescription
+    entity_description: HeatconRoomBinaryDescription
 
     def __init__(
         self,
-        coordinator: IntergasXceedDataUpdateCoordinator,
+        coordinator: HeatconDataUpdateCoordinator,
         room_id: int,
         room_name: str,
-        description: XceedRoomBinaryDescription,
+        description: HeatconRoomBinaryDescription,
     ) -> None:
         """Initialise the room binary sensor."""
         super().__init__(coordinator)
@@ -109,7 +109,7 @@ class IntergasXceedRoomBinarySensor(IntergasXceedEntity, BinarySensorEntity):
         self._attr_name = f"{room_name} {description.name}"
 
     @property
-    def _room(self) -> XceedRoom | None:
+    def _room(self) -> HeatconRoom | None:
         for room in self.coordinator.data.rooms:
             if room.id == self._room_id:
                 return room

@@ -1,4 +1,4 @@
-"""Time platform for the Intergas XCeed heating and hot water schedules."""
+"""Time platform for the HeatCon heating and hot water schedules."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import (
-    IntergasXceedDataUpdateCoordinator,
-    XceedDhw,
-    XceedDhwSlot,
-    XceedRoom,
+    HeatconDataUpdateCoordinator,
+    HeatconDhw,
+    HeatconDhwSlot,
+    HeatconRoom,
 )
-from .entity import IntergasXceedEntity
+from .entity import HeatconEntity
 
 DHW_NAME = "Domestic hot water"
 
@@ -63,7 +63,7 @@ ROOM_SCHEDULE_FIELDS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def _normalized_room_schedule(room: XceedRoom) -> list:
+def _normalized_room_schedule(room: HeatconRoom) -> list:
     """Return the room schedule padded/truncated to the fixed 21 slots."""
     schedule = list(room.schedule or [])
     if len(schedule) < ROOM_SCHEDULE_LENGTH:
@@ -96,7 +96,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the DHW comfort-window time entities."""
-    coordinator: IntergasXceedDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HeatconDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[TimeEntity] = []
 
     # The schedule comes from the XpertOnly wizard rather than a room, so the
@@ -107,7 +107,7 @@ async def async_setup_entry(
         for weekday_index, weekday_label in enumerate(WEEKDAYS):
             for field_key, field_label in DHW_SCHEDULE_FIELDS:
                 entities.append(
-                    IntergasXceedDhwScheduleTime(
+                    HeatconDhwScheduleTime(
                         coordinator,
                         weekday_index,
                         weekday_label,
@@ -124,7 +124,7 @@ async def async_setup_entry(
         for weekday_index, weekday_label in enumerate(WEEKDAYS):
             for field_key, field_label, slot_key in ROOM_SCHEDULE_FIELDS:
                 entities.append(
-                    IntergasXceedRoomScheduleTime(
+                    HeatconRoomScheduleTime(
                         coordinator,
                         room.id,
                         weekday_index,
@@ -138,14 +138,14 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class IntergasXceedDhwScheduleTime(IntergasXceedEntity, TimeEntity):
+class HeatconDhwScheduleTime(HeatconEntity, TimeEntity):
     """The comfort-window start or end time of a DHW weekday (wizard)."""
 
     _attr_icon = "mdi:clock-outline"
 
     def __init__(
         self,
-        coordinator: IntergasXceedDataUpdateCoordinator,
+        coordinator: HeatconDataUpdateCoordinator,
         weekday_index: int,
         weekday_label: str,
         field_key: str,
@@ -161,7 +161,7 @@ class IntergasXceedDhwScheduleTime(IntergasXceedEntity, TimeEntity):
         self._attr_name = f"{DHW_NAME} {weekday_label} {field_label}"
 
     @property
-    def _dhw(self) -> XceedDhw | None:
+    def _dhw(self) -> HeatconDhw | None:
         """Return the DHW model from the latest update."""
         return self.coordinator.data.dhw
 
@@ -171,7 +171,7 @@ class IntergasXceedDhwScheduleTime(IntergasXceedEntity, TimeEntity):
         dhw = self._dhw
         return super().available and dhw is not None and dhw.available
 
-    def _slot(self) -> XceedDhwSlot | None:
+    def _slot(self) -> HeatconDhwSlot | None:
         """Return the schedule slot for this weekday, if present."""
         dhw = self._dhw
         if dhw is None:
@@ -205,7 +205,7 @@ class IntergasXceedDhwScheduleTime(IntergasXceedEntity, TimeEntity):
         await self.coordinator.async_request_refresh()
 
 
-class IntergasXceedRoomScheduleTime(IntergasXceedEntity, TimeEntity):
+class HeatconRoomScheduleTime(HeatconEntity, TimeEntity):
     """The day-start or night-start hour of a heating zone weekday window.
 
     The runtime schedule endpoint stores whole hours only, so a value set here
@@ -216,7 +216,7 @@ class IntergasXceedRoomScheduleTime(IntergasXceedEntity, TimeEntity):
 
     def __init__(
         self,
-        coordinator: IntergasXceedDataUpdateCoordinator,
+        coordinator: HeatconDataUpdateCoordinator,
         room_id: int,
         weekday_index: int,
         weekday_label: str,
@@ -237,7 +237,7 @@ class IntergasXceedRoomScheduleTime(IntergasXceedEntity, TimeEntity):
         self._attr_name = f"{room_name} {weekday_label} {field_label}"
 
     @property
-    def _room(self) -> XceedRoom | None:
+    def _room(self) -> HeatconRoom | None:
         """Return the backing room from the latest data."""
         for room in self.coordinator.data.rooms:
             if room.id == self._room_id:

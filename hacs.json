@@ -1,8 +1,8 @@
 {
-  "name": "Intergas XCeed",
+  "name": "HeatCon",
   "content_in_root": false,
   "domains": [
-    "intergas_xceed"
+    "heatcon"
   ],
   "country": [
     "NL",

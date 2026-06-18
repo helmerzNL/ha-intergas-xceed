@@ -1,4 +1,4 @@
-"""Diagnostics support for Intergas XCeed."""
+"""Diagnostics support for HeatCon."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .coordinator import IntergasXceedDataUpdateCoordinator
+from .coordinator import HeatconDataUpdateCoordinator
 
 TO_REDACT = {
     CONF_HOST,
@@ -25,7 +25,7 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator: IntergasXceedDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HeatconDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     return {
         "entry": {
             "data": async_redact_data(dict(entry.data), TO_REDACT),
