@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import time, timedelta
 import logging
+import re
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,7 +17,14 @@ from .api import (
     HeatconAuthenticationError,
     HeatconApiError,
 )
-from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN, MIN_UPDATE_INTERVAL
+from .const import (
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    MIN_UPDATE_INTERVAL,
+    TELEMETRY_ENUM_STATES,
+    TELEMETRY_UNAVAILABLE_CODE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,6 +99,7 @@ class HeatconData:
     weather: dict[str, Any] = field(default_factory=dict)
     version: dict[str, Any] = field(default_factory=dict)
     dhw: HeatconDhw | None = None
+    telemetry: dict[str, float | str | None] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -188,8 +197,67 @@ def _parse(payload: dict[str, Any]) -> HeatconData:
         weather=payload.get("weather") or {},
         version=payload.get("version") or {},
         dhw=_parse_dhw(payload.get("dhw")),
+        telemetry=_parse_telemetry(payload.get("telemetry")),
         raw=payload,
     )
+
+
+def _parse_telemetry(
+    payload: dict[str, str] | None,
+) -> dict[str, float | str | None]:
+    """Decode the raw ``{PID: value string}`` telemetry map.
+
+    The key set mirrors the device response (so a sensor can stay defined even
+    when its current value is unavailable); each value is decoded to a float
+    (numeric reading), a string (enum/state), or ``None`` (unavailable).
+    """
+    if not payload:
+        return {}
+    return {pid: _decode_telemetry_value(text) for pid, text in payload.items()}
+
+
+def _decode_telemetry_value(text: Any) -> float | str | None:
+    """Decode a HeatCon! ``Informationswert`` value string.
+
+    ``":1<number><unit>"`` -> the leading number as a float (e.g. ``":18.21
+    BAR"`` -> ``8.21``); ``":2<code>"`` -> the mapped firmware state string
+    (e.g. ``":2208"`` -> ``"off"``), with ``557`` ("--") meaning unavailable;
+    anything else -> ``None``.
+    """
+    if not isinstance(text, str):
+        return None
+    if text.startswith(":1"):
+        literal = text[2:].strip()
+        if literal.endswith(" ?"):
+            literal = literal[:-2].strip()
+        return _parse_leading_number(literal)
+    if text.startswith(":2"):
+        code = text[2:].split(":")[0].strip()
+        if code == TELEMETRY_UNAVAILABLE_CODE:
+            return None
+        return TELEMETRY_ENUM_STATES.get(code)
+    return None
+
+
+def _parse_leading_number(literal: str) -> float | None:
+    """Parse the leading numeric token of a literal value, or ``None``.
+
+    Handles an English decimal point (``"8.21 BAR"`` -> ``8.21``) as well as a
+    comma decimal or comma thousands separator (``"1,234.5"`` -> ``1234.5``,
+    ``"12,5"`` -> ``12.5``).
+    """
+    match = re.match(r"[-+]?[\d.,]+", literal)
+    if not match:
+        return None
+    token = match.group(0)
+    if "," in token and "." in token:
+        token = token.replace(",", "")
+    elif "," in token:
+        token = token.replace(",", ".")
+    try:
+        return float(token)
+    except ValueError:
+        return None
 
 
 def _parse_dhw(payload: dict[str, Any] | None) -> HeatconDhw | None:

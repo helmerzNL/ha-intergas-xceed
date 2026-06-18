@@ -126,6 +126,33 @@ these `time` entities to `input_datetime` helpers and keeps them in two‑way sy
 - **Active modes** - a comma-separated list of the operating modes that are
   currently active.
 
+#### Heat pump telemetry (Information menu)
+
+The same read-only values the heatapp! app shows under its **Information**
+menus are exposed as sensors. They are read through the device's local
+parameter wizard at most once every two minutes, independently of the main
+polling cycle, and a sensor is only created when its value is present in your
+installation. Values that the controller reports as `--` (not available) become
+unavailable rather than wrong. The more installer-oriented readings (individual
+refrigerant-circuit temperatures, voltages/currents, start counters and
+runtimes, per-day COP history) are marked as diagnostic.
+
+- **Energy & efficiency**: thermal energy produced, energy this month, energy
+  this year, thermal output, COP total and COP today (plus COP yesterday as
+  diagnostic).
+- **Heat generator**: status, pump, volume flow, supply and return flow
+  temperatures, ambient temperature, compressor frequency, fan speed and power
+  consumption.
+- **Refrigerant circuit** (diagnostic): high/low refrigerant pressure, the T1-T4
+  circuit temperatures, high/low pressure temperatures and inverter temperature.
+- **Electrical** (diagnostic): AC input voltage, heat pump input voltage and
+  currents, compressor input current and EEV opening step.
+- **Runtime** (diagnostic): compressor total and stage 2 start counts and
+  runtimes.
+- **System sensors**: heating buffer temperature, outdoor sensor temperature
+  (AF), DHW storage sensor temperature, room 1 sensor temperature (diagnostic)
+  and the CV system water pressure.
+
 ### Binary sensors
 
 - **System error** - on when the controller reports any fault.

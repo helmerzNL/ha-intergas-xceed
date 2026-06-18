@@ -42,6 +42,8 @@ from .const import (
     ENDPOINT_WIZARD_START,
     ENDPOINT_XPERTONLY_START,
     REQUEST_TIMEOUT,
+    TELEMETRY_REFRESH_INTERVAL,
+    TELEMETRY_SCREENS,
     WIZARD_MODE_XPERTONLY,
     WIZARD_REFRESH_INTERVAL,
     WIZARD_SAVE_TYPE_PARAMETER,
@@ -232,6 +234,10 @@ class HeatconApiClient:
         self._dhw_bounds: dict[str, Any] | None = None
         self._dhw_dirty = False
         self._dhw_last_read = 0.0
+        # Telemetry (Information-menu) wizard state; read-only, throttled
+        # independently of the DHW read but serialised by the same wizard lock.
+        self._telemetry_cache: dict[str, str] | None = None
+        self._telemetry_last_read = 0.0
 
     @property
     def host(self) -> str:
@@ -290,6 +296,10 @@ class HeatconApiClient:
         # raises - on failure it returns the previous cache (or None).
         dhw = await self._async_get_dhw_cached()
 
+        # Read-only Information-menu telemetry (energy, COP, speeds, flow,
+        # pressures, temperatures) via the same wizard; also failure-tolerant.
+        telemetry = await self._async_get_telemetry_cached()
+
         return {
             "version": version or {},
             "rooms": rooms,
@@ -298,6 +308,7 @@ class HeatconApiClient:
             "weather": weather or {},
             "schedules": schedules,
             "dhw": dhw,
+            "telemetry": telemetry,
         }
 
     async def async_set_room_temperature(
@@ -663,6 +674,54 @@ class HeatconApiClient:
             payload["day_bounds"] = self._dhw_bounds.get("day")
             payload["night_bounds"] = self._dhw_bounds.get("night")
         return payload
+
+    async def _async_get_telemetry_cached(self) -> dict[str, str] | None:
+        """Return the Information-menu telemetry, throttled and failure-tolerant.
+
+        Mirrors :meth:`_async_get_dhw_cached`: the wizard screens are re-read at
+        most once per ``TELEMETRY_REFRESH_INTERVAL`` and any failure keeps and
+        returns the previous cache so a transient wizard problem never breaks
+        the main read model. Serialised with the DHW read by ``_wizard_lock``.
+        """
+        async with self._wizard_lock:
+            now = monotonic()
+            if (
+                self._telemetry_cache is not None
+                and now - self._telemetry_last_read < TELEMETRY_REFRESH_INTERVAL
+            ):
+                return self._telemetry_cache
+            try:
+                await self._async_enter_wizard()
+                payload = await self._async_read_telemetry()
+            except HeatconApiError as err:
+                _LOGGER.debug(
+                    "HeatCon telemetry wizard read failed, keeping cache: %s", err
+                )
+                return self._telemetry_cache
+            self._telemetry_cache = payload
+            self._telemetry_last_read = now
+            return payload
+
+    async def _async_read_telemetry(self) -> dict[str, str]:
+        """Read every telemetry screen, returning a ``{PID: raw value}`` map.
+
+        Assumes a wizard session was just entered. One ``wizard/next`` per
+        screen servercode; the ``Informationswert`` rows from all screens are
+        merged by PID. The raw ``Text3`` value string is kept verbatim and
+        decoded downstream in the coordinator.
+        """
+        values: dict[str, str] = {}
+        for servercode in TELEMETRY_SCREENS:
+            entries = _wizard_entries(await self._wizard_next(servercode))
+            for entry in entries:
+                if entry.get("FormatNext") != "Informationswert":
+                    continue
+                pid = entry.get("PID")
+                text = entry.get("Text3")
+                if pid is None or text is None:
+                    continue
+                values[str(pid)] = text
+        return values
 
     async def _async_enter_wizard(self) -> None:
         """Establish a fresh signed session and open the XpertOnly wizard.

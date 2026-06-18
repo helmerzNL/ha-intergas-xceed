@@ -13,13 +13,54 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, UnitOfTemperature
+from homeassistant.const import (
+    REVOLUTIONS_PER_MINUTE,
+    EntityCategory,
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfEnergy,
+    UnitOfFrequency,
+    UnitOfPower,
+    UnitOfPressure,
+    UnitOfTemperature,
+    UnitOfTime,
+    UnitOfVolumeFlowRate,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, TELEMETRY_SENSORS
 from .coordinator import HeatconDataUpdateCoordinator, HeatconRoom
 from .entity import HeatconEntity
+
+
+_TELEMETRY_UNITS: dict[str, str] = {
+    "celsius": UnitOfTemperature.CELSIUS,
+    "bar": UnitOfPressure.BAR,
+    "kwh": UnitOfEnergy.KILO_WATT_HOUR,
+    "kw": UnitOfPower.KILO_WATT,
+    "hz": UnitOfFrequency.HERTZ,
+    "v": UnitOfElectricPotential.VOLT,
+    "a": UnitOfElectricCurrent.AMPERE,
+    "m3h": UnitOfVolumeFlowRate.CUBIC_METERS_PER_HOUR,
+    "rpm": REVOLUTIONS_PER_MINUTE,
+    "h": UnitOfTime.HOURS,
+}
+_TELEMETRY_DEVICE_CLASSES: dict[str, SensorDeviceClass] = {
+    "temperature": SensorDeviceClass.TEMPERATURE,
+    "pressure": SensorDeviceClass.PRESSURE,
+    "energy": SensorDeviceClass.ENERGY,
+    "power": SensorDeviceClass.POWER,
+    "frequency": SensorDeviceClass.FREQUENCY,
+    "voltage": SensorDeviceClass.VOLTAGE,
+    "current": SensorDeviceClass.CURRENT,
+    "volume_flow_rate": SensorDeviceClass.VOLUME_FLOW_RATE,
+    "duration": SensorDeviceClass.DURATION,
+}
+_TELEMETRY_STATE_CLASSES: dict[str, SensorStateClass] = {
+    "measurement": SensorStateClass.MEASUREMENT,
+    "total_increasing": SensorStateClass.TOTAL_INCREASING,
+}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -93,6 +134,11 @@ async def async_setup_entry(
             entities.append(
                 HeatconRoomSensor(coordinator, room.id, room.name, description)
             )
+
+    telemetry = coordinator.data.telemetry
+    for spec in TELEMETRY_SENSORS:
+        if spec["pid"] in telemetry:
+            entities.append(HeatconTelemetrySensor(coordinator, spec))
 
     async_add_entities(entities)
 
@@ -220,3 +266,45 @@ class HeatconActiveScenesSensor(HeatconEntity, SensorEntity):
                 scene.name for scene in self.coordinator.data.scenes if scene.active
             ],
         }
+
+
+class HeatconTelemetrySensor(HeatconEntity, SensorEntity):
+    """A read-only Information-menu telemetry sensor keyed on a firmware PID."""
+
+    def __init__(
+        self,
+        coordinator: HeatconDataUpdateCoordinator,
+        spec: dict[str, Any],
+    ) -> None:
+        """Initialise a telemetry sensor from its catalog spec."""
+        super().__init__(coordinator)
+        self._pid: str = spec["pid"]
+        self._kind: str = spec["kind"]
+        self._attr_name = spec["name"]
+        self._attr_unique_id = f"{self._serial}_telemetry_{self._pid}"
+
+        device_class = spec.get("device_class")
+        if device_class is not None:
+            self._attr_device_class = _TELEMETRY_DEVICE_CLASSES.get(device_class)
+        unit = spec.get("unit")
+        if unit is not None:
+            self._attr_native_unit_of_measurement = _TELEMETRY_UNITS.get(unit)
+        state_class = spec.get("state_class")
+        if state_class is not None:
+            self._attr_state_class = _TELEMETRY_STATE_CLASSES.get(state_class)
+        if spec.get("diagnostic"):
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def available(self) -> bool:
+        # The PID key is present whenever the screen was read, even when the
+        # decoded value is currently unavailable ("--"), so keep the entity
+        # available as long as the telemetry read itself succeeded.
+        return super().available and self._pid in self.coordinator.data.telemetry
+
+    @property
+    def native_value(self) -> float | str | None:
+        value = self.coordinator.data.telemetry.get(self._pid)
+        if self._kind == "numeric":
+            return value if isinstance(value, (int, float)) else None
+        return value if isinstance(value, str) else None
