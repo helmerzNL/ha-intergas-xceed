@@ -1,10 +1,20 @@
 # HeatCon
 
 <p align="center">
-  <img src="./icon.png" alt="HeatCon logo" width="180">
+  <img src="./icon.png" alt="heatapp! logo" width="180">
 </p>
 
 [![Open your Home Assistant instance and add this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=helmerzNL&repository=ha-heatcon&category=integration)
+
+## Supported devices
+
+This integration works with heat sources built around the **EBV HeatCon!**
+controller and reached through the **heatapp!** local gateway:
+
+- **Intergas XCeed** – all-electric heat pump
+
+Other HeatCon!-based systems that expose the same local heatapp! API are
+expected to work as well.
 
 ## Installation
 
